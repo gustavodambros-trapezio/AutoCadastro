@@ -1,0 +1,14 @@
+# Segredos e dados — NUNCA versionar:
+# .env               = credenciais do usuário-robô do Protheus e do site
+# protheus_config.json = tem a senha do site (use protheus_config.exemplo.json)
+# autocadastro.db    = banco local com CPFs e senhas dos usuários criados
+.env
+protheus_config.json
+autocadastro.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Config local do Claude Code
+.claude/settings.local.json

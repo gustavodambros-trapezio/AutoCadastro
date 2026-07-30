@@ -1,0 +1,270 @@
+[
+  {
+    "codigo": "01ALFA0001",
+    "descricao": "AUTO POSTO ALFA LTDA"
+  },
+  {
+    "codigo": "01ALMI0001",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0002",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0003",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0004",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0005",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0006",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0007",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0008",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0009",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0011",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0012",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0013",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0014",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0015",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0016",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0017",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0018",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0019",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALMI0024",
+    "descricao": "AUTO POSTO ALMIRANTE"
+  },
+  {
+    "codigo": "01ALPH0001",
+    "descricao": "AUTO POSTO ALPHAVILLE"
+  },
+  {
+    "codigo": "01AMEC0001",
+    "descricao": "AUTO POSTO AMERICA"
+  },
+  {
+    "codigo": "01BEIR0001",
+    "descricao": "POSTO BEIRA RIO"
+  },
+  {
+    "codigo": "01BRAS0001",
+    "descricao": "POSTO METROPOLE BRASIL LTDA"
+  },
+  {
+    "codigo": "01CISN0001",
+    "descricao": "POSTO METROPOLE CISNE LTDA"
+  },
+  {
+    "codigo": "01DOMA0001",
+    "descricao": "ABASTECEDORA DE COMBUSTÍVEIS DOM AFONSO"
+  },
+  {
+    "codigo": "01DUQC0001",
+    "descricao": "AUTO POSTO DUQUE DE CAXIAS LTDA"
+  },
+  {
+    "codigo": "01ESTA0001",
+    "descricao": "AUTO POSTO ESTAIADA LTDA"
+  },
+  {
+    "codigo": "01IZAA0001",
+    "descricao": "AUTO POSTO PETRO IZAAC"
+  },
+  {
+    "codigo": "01LVER0001",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0002",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0003",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0004",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0005",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0006",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0007",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0008",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0010",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0011",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0013",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0014",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0015",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0016",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0017",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0018",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0020",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0021",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0022",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0023",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0024",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0025",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0026",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0027",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0028",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01LVER0030",
+    "descricao": "POSTO LINHA VERDE LTDA"
+  },
+  {
+    "codigo": "01MARE0001",
+    "descricao": "AUTO POSTO MARECHAL S/A"
+  },
+  {
+    "codigo": "01MIRA0001",
+    "descricao": "AUTO POSTO MIRANTE DE PIRACICABA LTDA"
+  },
+  {
+    "codigo": "01NENI0001",
+    "descricao": "AUTO POSTO NENINHA BEMBA LTDA"
+  },
+  {
+    "codigo": "01NSAL0001",
+    "descricao": "POSTO METROPOLE NSA LTDA"
+  },
+  {
+    "codigo": "01PREM0001",
+    "descricao": "AUTO POSTO PREMIERE LTDA"
+  },
+  {
+    "codigo": "01RIOV0001",
+    "descricao": "AUTO POSTO RIO VERDE LTDA"
+  },
+  {
+    "codigo": "01RTRI0001",
+    "descricao": "R.TRAPEZIO TRIANGULO"
+  },
+  {
+    "codigo": "01TIJU0001",
+    "descricao": "POSTO TIJUCAS LTDA"
+  },
+  {
+    "codigo": "01TOFL0001",
+    "descricao": "SUPER POSTO TOF LTDA"
+  },
+  {
+    "codigo": "01TRIA0001",
+    "descricao": "AUTO POSTO PETRO TRIANGULO LTDA"
+  },
+  {
+    "codigo": "01TSLT0001",
+    "descricao": "AUTO POSTO TS LIMITADA"
+  },
+  {
+    "codigo": "01VILA0001",
+    "descricao": "AUTO POSTO VILA RESENDE LTDA"
+  }
+]

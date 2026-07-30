@@ -1,0 +1,8 @@
+{
+  "url": "https://protheus.grupotrapezio.com.br/webapp/#",
+  "modo": "attach",
+  "chrome_debug": "127.0.0.1:9222",
+  "porta_site": 8025,
+  "site_usuario": "admin",
+  "site_senha": "AUTO@users10"
+}
