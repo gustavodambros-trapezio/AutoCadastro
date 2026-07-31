@@ -1361,11 +1361,32 @@ class TelaProtheus:
         # Atenção: a lista de usuários por trás também mostra códigos de 6
         # dígitos na coluna Id — por isso exigimos que a linha esteja ABAIXO do
         # cabeçalho da grade.
-        cels = self._js(JS_CELULAS_GRADE_GRUPOS)
-        linha = next((c for c in cels if c["t"] == str(grupo_codigo)
-                      and c["x"] < 60 and c["y"] > cab["y"]), None)
+        # ⚠️ A resolução do nome pode DEMORAR e a digitação pode não pegar na
+        # primeira (célula sem foco) — checagem única derrubou a REGINA na
+        # execução 16 ("O grupo 000013 não apareceu na grade") sem motivo.
+        # Agora: espera até 8s e REDIGITA até 2 vezes antes de desistir.
+        linha = None
+        for tentativa in range(3):
+            fim = time.time() + 8
+            while time.time() < fim:
+                cels = self._js(JS_CELULAS_GRADE_GRUPOS)
+                linha = next((c for c in cels if c["t"] == str(grupo_codigo)
+                              and c["x"] < 60 and c["y"] > cab["y"]), None)
+                if linha:
+                    break
+                time.sleep(1)
+            if linha:
+                break
+            self.log(f"    grupo ainda não apareceu na grade "
+                     f"(tentativa {tentativa + 1}) — digitando de novo")
+            if not self._clica_celula(cab["x"] + 30, cab["y"] + 28,
+                                      grupo_codigo, com_tab=True):
+                raise RuntimeError(
+                    f"Não consegui informar o grupo {grupo_codigo} na grade.")
+            time.sleep(2)
         if not linha:
             raise RuntimeError(f"O grupo {grupo_codigo} não apareceu na grade.")
+        cels = self._js(JS_CELULAS_GRADE_GRUPOS)
         nome = next((c["t"] for c in cels
                      if abs(c["y"] - linha["y"]) < 8 and 60 < c["x"] < 400), "")
         self.log(f"    grupo na grade: {grupo_codigo} {nome}")

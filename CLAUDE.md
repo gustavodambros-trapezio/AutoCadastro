@@ -93,17 +93,30 @@ Decisões do usuário:
   para o `C:\ChromeProtheus2` editando `Default\Preferences`
   (`protocol_handler.allowed_origin_protocol_pairs`) — funcionou, o perfil
   novo não pede mais o diálogo do WebAgent.
-- **⚠️ ONDE PAROU (30/07, ~13h):** o Chrome 2 abre, o robô loga
-  (AUTO.PROTHEUS) e seleciona o contexto sozinho, o menu do módulo chega ao
-  DOM, MAS o overlay **"Dicionário de parametros / Carregando / Aguarde para
-  utilizar o TOTVS Linha Protheus" nunca sai** (>15 min, e refresh+relogin
-  não resolve) — a 2ª sessão simultânea do MESMO login não termina de
-  carregar neste servidor. Detalhe: a execução 12 (produção, 9222) rodou
-  inteira EM PARALELO sem ser afetada. Hipótese: recurso por usuário no
-  servidor (dicionário) preso pela 1ª sessão. PRÓXIMOS PASSOS: perguntar ao
-  usuário como ele abre as "2 telas" dele (2 abas do mesmo Chrome?) e/ou
-  testar com um SEGUNDO login de robô (ex.: AUTO.PROTHEUS2) no Chrome 2.
-  O Chrome 2 foi fechado no fim dos testes.
+- **DESCOBERTA-CHAVE (31/07): 2ª sessão funciona em ABA do MESMO Chrome, não
+  em Chrome separado.** Num 2º Chrome (perfil próprio) a sessão trava para
+  sempre no overlay "Dicionário de parametros / Carregando" (>15 min, refresh
+  não resolve — limitação aparente do WebAgent local, que atende UM
+  navegador). Já numa **aba nova do Chrome de produção** (`testa_aba2.py` no
+  scratchpad): login AUTO.PROTHEUS + contexto + módulo carregado **em 68s**,
+  sem afetar a aba 1. As "5 telas" que o usuário abre são abas/janelas do
+  mesmo navegador. → O plano multi-telas deve usar N ABAS do Chrome 9222,
+  um robô por aba. O Chrome 2 (9223/`C:\ChromeProtheus2`) fica abandonado
+  como abordagem para MESMO login (ainda pode servir com um 2º login de robô).
+- **Capacidade da máquina (medida 31/07)**: i3-12100 (4c/8t, sobra CPU),
+  **7,8 GB de RAM com só 1,8–2,4 GB livres** — RAM é o limitador. Chrome com
+  1 aba Protheus ≈ 0,9 GB; cada aba extra ≈ 0,3 GB + ~0,15 GB por robô
+  (python+chromedriver). Estimativa segura com a RAM atual: **3 telas
+  simultâneas** (4 no talo). Para as 5 telas do plano do usuário →
+  **upgrade para 16 GB** recomendado.
+- **O que falta ENGENHEIRAR para N robôs em abas** (não começado):
+  (a) cada robô criar/adotar a própria aba e nunca tocar nas outras — hoje
+  `_focar_aba_protheus` pega a PRIMEIRA aba do Protheus; (b) trava por aba
+  (hoje é por porta); (c) o site gerenciar N execuções simultâneas e dividir
+  um lote entre telas (hoje `_trava_execucao`/`_proc_atual` assumem 1);
+  (d) validar clique/tecla em ABA EM SEGUNDO PLANO (CDP entrega eventos a
+  aba sem foco, mas o Chrome estrangula timers de aba de fundo — testar com
+  criação real; talvez `--disable-background-timer-throttling`).
 - FALTA: mapear a tela de Cadastro de Vendedores (rotina no menu, campos,
   regras — perguntar ao usuário) e implementar preencher/confirmar com a
   regra de testes = preencher e DESCARTAR até autorização.
@@ -113,6 +126,12 @@ Decisões do usuário:
 - **Login:** `PRIMEIRO.ULTIMO`; se existir, `PRIMEIRO.PENULTIMO`,
   `PRIMEIRO.ANTEPENULTIMO`… e, esgotados os nomes, `PRIMEIRO.ULTIMO2`, `3`, `4`…
   Conectores (DA/DE/DO/DAS/DOS) nunca entram como sobrenome. Sem acentos.
+- **Exceção SMART POS (regra do usuário, 31/07/2026):** nome que começa com
+  número e contém SMART (ex.: `01 SMART POS LV 023`) → tudo igual, só o
+  login muda e é FIXO: `SMARTPOS(nº do início).(código da filial)` — ex.:
+  `SMARTPOS01.01LVER0023`. Sem cascata: se já existir, dá erro (apurar).
+  Implementado em `login_smart()` (`protheus_criar_usuario.py`), testado com
+  7 casos incluindo "SMARTPOS" junto e nomes normais (não disparam).
 - **Senha:** `Grupo@2026`, e **desmarcar** "Forçar troca de senha no próx. logon".
 - **Regra de acesso por grupo:** `1 - Priorizar`. Na grade de Grupos, **Prioriza = Sim**.
 - **Grupo:** função contendo `GERENTE` **ou** `LIDER DE LOJA` → **000013**
@@ -389,6 +408,27 @@ usuário `ADMIN`). Tudo abaixo está **feito e testado**:
   registro não os perder. JANE.PEREIRA existe no Protheus: **D12/001303**,
   grupo 000013 — wizard concluído à mão com o código novo (107s, incluindo o
   processamento do Finalizar) e o banco corrigido. Restam 7 para recadastrar.
+- **Execuções 13–16 (30/07, tarde, filial 01LVER0023, lote de 21)**:
+  exec 13 criou 5 (D20-D24/001311-001315) e parou na FRANCELISE.AMARAL (ID
+  não lido → lote interrompido pela regra nova). ⚠️ Pelos códigos/IDs
+  vizinhos, FRANCELISE muito provavelmente EXISTE como **D25/001316** —
+  PENDENTE confirmar com o usuário e acertar a linha dela (ou usar o botão
+  de criado manualmente). Execs 14/15 falharam na largada ("Trocar módulo
+  não encontrado" — sobra de tela da 13, destravada manualmente). Exec 16
+  criou 14 de 15 (~2 min/usuário); o único erro foi REGINA: "O grupo 000013
+  não apareceu na grade" (checagem única e apressada da grade — corrigida em
+  31/07 com espera de até 8s + até 2 redigitações em `preenche_grupo`).
+  REGINA foi criada MANUALMENTE pelo usuário no Protheus.
+- **Botão "✓ Usuário foi criado manualmente"** (31/07, pedido do usuário):
+  aparece ao lado de cada linha com ERRO na tela da execução (quando não
+  está rodando). Rota POST `/criado_manual/<id>`: status vira
+  **CRIADO MANUALMENTE**, o CPF passa a contar na trava (que agora usa
+  `LIKE 'CRIADO%'`, assim como a tela/export de usuários criados e os
+  contadores), e os números da execução são recalculados. REGINA (exec 16)
+  já foi marcada assim. O Protheus não é tocado pelo botão.
+- **Chrome de produção encontrado FECHADO em 31/07 de manhã** (a máquina não
+  reiniciou; causa desconhecida). Sem estrago: o robô reabre e reloga
+  sozinho. Reaberto via smoke test de filial falsa.
 - **Atualização usuário a usuário em tempo real** (pedido do usuário na
   execução nº 10): o robô agora emite `@@PARCIAL@@{json}` no stdout a cada
   usuário terminado (`_emitir_parcial` em `protheus_criar_usuario.py`) e o

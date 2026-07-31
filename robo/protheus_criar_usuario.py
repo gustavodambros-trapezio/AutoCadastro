@@ -163,6 +163,26 @@ def candidatos_login(nome_completo):
         n += 1
 
 
+# nomes de SMART POS: começam com o número da smart e contêm "SMART"
+# (vale "SMART POS" e também "SMARTPOS" escrito junto)
+RE_SMART = re.compile(r"^\s*(\d+)\s.*\bSMART", re.I)
+
+
+def login_smart(nome_completo, filial):
+    """
+    Regra do usuário (31/07/2026): quando o NOME vem de SMART POS, tudo fica
+    igual (nome completo, senha, grupo...), só o LOGIN muda e é FIXO:
+        "01 SMART POS LV 023" na filial 01LVER0023 -> SMARTPOS01.01LVER0023
+        "02 SMART POS LV 023" na filial 01LVER0023 -> SMARTPOS02.01LVER0023
+    Formato: SMARTPOS(nº que aparece no início do nome).(código da filial).
+    Devolve None quando o nome não é de SMART (segue a regra normal).
+    """
+    m = RE_SMART.match(nome_completo or "")
+    if not m:
+        return None
+    return f"SMARTPOS{m.group(1)}.{filial}"
+
+
 def grupo_para_funcao(funcao):
     f = _sem_acentos(funcao or "").upper()
     if "GERENTE" in f or "LIDER DE LOJA" in f:
@@ -344,7 +364,7 @@ class SemConfirmacaoID(RuntimeError):
 # ----------------------------------------------------------------------------
 # CRIAÇÃO DE 1 USUÁRIO
 # ----------------------------------------------------------------------------
-def criar_usuario(tela, nome_completo, grupo_codigo):
+def criar_usuario(tela, nome_completo, grupo_codigo, filial=""):
     """
     Cria 1 usuário na tela já aberta do Cadastro de usuários.
     Fluxo VALIDADO em 29/07/2026 criando BRENDA RAMOS PINHEIRO
@@ -360,7 +380,15 @@ def criar_usuario(tela, nome_completo, grupo_codigo):
     #    "Não é permitido duplicação de códigos" ao sair do campo, e é ali que
     #    passamos para o próximo candidato (PRIMEIRO.ULTIMO ->
     #    PRIMEIRO.PENULTIMO -> ... -> PRIMEIRO.ULTIMO2, 3...).
-    login = tela.define_login(candidatos_login(nome_completo),
+    #    Exceção SMART POS (31/07/2026): login FIXO SMARTPOS(nº).(filial) —
+    #    sem cascata; se já existir, é erro mesmo (o certo é apurar).
+    smart = login_smart(nome_completo, filial)
+    if smart:
+        log(f"    nome de SMART POS — login fixo: {smart}")
+        candidatos = iter([smart])
+    else:
+        candidatos = candidatos_login(nome_completo)
+    login = tela.define_login(candidatos,
                               max_tentativas=MAX_TENTATIVAS_LOGIN)
 
     # 3) Demais dados. E-mail NUNCA é preenchido.
@@ -583,7 +611,7 @@ def main():
                     if not r["nome_completo"]:
                         raise RuntimeError("Nome vazio.")
                     login, codigo_banco, id_usuario = criar_usuario(
-                        tela, r["nome_completo"], r["grupo_codigo"])
+                        tela, r["nome_completo"], r["grupo_codigo"], filial)
                     r.update({"usuario": login, "codigo_banco": codigo_banco,
                               "id_usuario": id_usuario, "status": "CRIADO"})
                     log(f"  OK -> {login} | banco={codigo_banco or '?'} | id={id_usuario or '?'}")

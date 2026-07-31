@@ -315,7 +315,7 @@ def rodar_execucao(execucao_id, pendentes):
 def _finalizar(con, execucao_id, status):
     q = lambda sql: con.execute(sql, (execucao_id,)).fetchone()["c"]  # noqa: E731
     tot = q("SELECT COUNT(*) c FROM usuarios WHERE execucao_id=?")
-    ok = q("SELECT COUNT(*) c FROM usuarios WHERE execucao_id=? AND status='CRIADO'")
+    ok = q("SELECT COUNT(*) c FROM usuarios WHERE execucao_id=? AND status LIKE 'CRIADO%'")
     err = q("SELECT COUNT(*) c FROM usuarios WHERE execucao_id=? AND status LIKE 'ERRO%'")
     # pedido do usuário (30/07/2026): bastou 1 erro, a execução é FALHOU
     if status == "CONCLUIDA" and err:
@@ -369,6 +369,10 @@ ESTILO = """
   table.grade input:focus { background: #eaf3ff; }
   button.parar { background: #b33232; }
   button.parar:hover { background: #8f2020; }
+  button.manual { background: none; border: 1px solid #0c3c60; color: #0c3c60; margin: 0; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+  button.manual:hover { background: #dfe7ee; }
+  a.editar { text-decoration: none; padding: 3px 7px; border-radius: 3px; color: #0c3c60; }
+  a.editar:hover { background: #dfe7ee; }
   button.apagar { background: none; border: 0; color: #b33; cursor: pointer; margin: 0; padding: 5px 8px; font-size: 15px; line-height: 1; }
   button.apagar:hover { background: #ffd8d8; border-radius: 3px; }
   form.form-apagar { margin: 0; display: inline; }
@@ -415,7 +419,9 @@ TABELA_USUARIOS = """
 <tr><th>#</th><th>FILIAL</th><th>NOME</th><th>CPF</th><th>FUNÇÃO</th><th>USUARIO</th>
 <th>SENHA</th><th>GRUPO</th><th>GRUPO NOME</th><th>PRIORIZA</th><th>TROCA SENHA</th>
 <th>CÓD. BANCO</th><th>ID USUÁRIO</th><th>STATUS</th><th>QUANDO</th>
-{% if apagar %}<th></th>{% endif %}</tr>
+{% if editar %}<th></th>{% endif %}
+{% if apagar %}<th></th>{% endif %}
+{% if marcar_manual %}<th></th>{% endif %}</tr>
 {% for u in usuarios %}
 <tr>
   <td>{{ loop.index }}</td>
@@ -427,6 +433,10 @@ TABELA_USUARIOS = """
   <td>{{ u['id_usuario'] }}</td>
   <td class="st-{{ classe_status(u['status']) }}">{{ u['status'] }}</td>
   <td>{{ u['criado_em'] or '' }}</td>
+  {% if editar %}
+  <td><a class="editar" href="{{ url_for('editar_usuario', usuario_id=u['id']) }}"
+         title="Editar login, código do banco, ID e status desta linha">&#9998;</a></td>
+  {% endif %}
   {% if apagar %}
   <td>
     <form method="post" class="form-apagar"
@@ -434,6 +444,18 @@ TABELA_USUARIOS = """
           onsubmit="return confirm('Apagar {{ u['nome'] }} SOMENTE do banco do site?\\n\\nO usuário {{ u['usuario'] or '(sem login)' }} continua existindo no Protheus. O CPF fica liberado para um novo cadastro.')">
       <button type="submit" class="apagar" title="Apagar do banco do site (não mexe no Protheus)">&#10005;</button>
     </form>
+  </td>
+  {% endif %}
+  {% if marcar_manual %}
+  <td>
+    {% if u['status'] and u['status'].startswith('ERRO') %}
+    <form method="post" class="form-apagar"
+          action="{{ url_for('criado_manual', usuario_id=u['id']) }}"
+          onsubmit="return confirm('Confirmar que {{ u['nome'] }} foi criado MANUALMENTE no Protheus?\\n\\nA linha vira CRIADO MANUALMENTE e o CPF passa a contar como já utilizado (não será recadastrado).')">
+      <button type="submit" class="manual"
+              title="Marque se você mesmo criou este usuário no Protheus — o CPF passa a contar como já utilizado">✓ Usuário foi criado manualmente</button>
+    </form>
+    {% endif %}
   </td>
   {% endif %}
 </tr>
@@ -556,7 +578,7 @@ SCRIPT_GRADE = """
 
 def classe_status(status):
     s = (status or "").upper()
-    if s == "CRIADO":
+    if s.startswith("CRIADO"):     # inclui "CRIADO MANUALMENTE"
         return "CRIADO"
     if s.startswith("ERRO"):
         return "ERRO"
@@ -575,9 +597,10 @@ def render(conteudo, aba="", refresh=False):
                                   rodando=rodando, conectado=chrome_conectado())
 
 
-def render_tabela(usuarios, apagar=False):
+def render_tabela(usuarios, apagar=False, marcar_manual=False, editar=False):
     return render_template_string(TABELA_USUARIOS, usuarios=usuarios,
-                                  classe_status=classe_status, apagar=apagar)
+                                  classe_status=classe_status, apagar=apagar,
+                                  marcar_manual=marcar_manual, editar=editar)
 
 
 # ----------------------------------------------------------------------------
@@ -667,8 +690,9 @@ def criar():
             execucao_id = cur.lastrowid
             pendentes = []
             for u in linhas:
+                # LIKE 'CRIADO%' inclui os marcados como "CRIADO MANUALMENTE"
                 repetido = con.execute(
-                    "SELECT usuario FROM usuarios WHERE status='CRIADO' AND "
+                    "SELECT usuario FROM usuarios WHERE status LIKE 'CRIADO%' AND "
                     "replace(replace(replace(cpf,'.',''),'-',''),' ','')=?",
                     (so_digitos(u["cpf"]),)).fetchone()
                 status = "PROCESSANDO"
@@ -727,10 +751,111 @@ def ver_execucao(execucao_id):
       | Situação: <b>{ex['status']}</b></p>
       <p>{situacao}</p>
       {botao_parar}
-      {render_tabela(usuarios)}
+      {render_tabela(usuarios, marcar_manual=not rodando, editar=not rodando)}
+      {'' if rodando else '<p class="mini">Linhas com ERRO têm o botão '
+       '"✓ Usuário foi criado manualmente": use quando você mesmo criou a '
+       'pessoa no Protheus — o CPF passa a contar como já utilizado.</p>'}
     </div>
     """
     return render(conteudo, aba="historico", refresh=rodando)
+
+
+@app.route("/editar_usuario/<int:usuario_id>", methods=["GET", "POST"])
+@exige_login
+def editar_usuario(usuario_id):
+    """
+    Edição manual de uma linha (pedido do usuário em 31/07/2026): corrigir
+    login, código do banco, ID e status quando o robô não conseguiu apurar
+    (ex.: FRANCELISE da execução 13). Só mexe no banco do site.
+    """
+    with db() as con:
+        u = con.execute("SELECT * FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
+    if not u:
+        return redirect(url_for("historico"))
+
+    if request.method == "POST":
+        novo_status = (request.form.get("status") or "").strip()
+        if novo_status == "(manter)":
+            novo_status = u["status"]
+        with db() as con:
+            con.execute(
+                "UPDATE usuarios SET usuario=?, codigo_banco=?, id_usuario=?, status=? "
+                "WHERE id=?",
+                ((request.form.get("usuario") or "").strip().upper(),
+                 (request.form.get("codigo_banco") or "").strip().upper(),
+                 (request.form.get("id_usuario") or "").strip(),
+                 novo_status, usuario_id))
+            con.execute("""UPDATE execucoes SET
+                criados=(SELECT COUNT(*) FROM usuarios x
+                         WHERE x.execucao_id=execucoes.id AND x.status LIKE 'CRIADO%'),
+                erros=(SELECT COUNT(*) FROM usuarios x
+                       WHERE x.execucao_id=execucoes.id AND x.status LIKE 'ERRO%')
+                WHERE id=?""", (u["execucao_id"],))
+            con.execute("UPDATE execucoes SET status='CONCLUIDA' "
+                        "WHERE id=? AND erros=0 AND status='FALHOU'",
+                        (u["execucao_id"],))
+        return redirect(url_for("ver_execucao", execucao_id=u["execucao_id"]))
+
+    conteudo = f"""
+    <div class="cartao" style="max-width:560px">
+      <h2>Editar linha — {u['nome']}</h2>
+      <p class="mini">CPF {u['cpf']} · filial {u['filial']} · execução nº {u['execucao_id']}.<br>
+      Isto altera SÓ o banco do site (o Protheus não é tocado). Use para
+      registrar o que você apurou manualmente no Protheus.</p>
+      <form method="post">
+        <label>Usuário (login)</label>
+        <input type="text" name="usuario" value="{u['usuario'] or ''}" autocomplete="off">
+        <label>Código do banco (3 caracteres, ex.: D25)</label>
+        <input type="text" name="codigo_banco" value="{u['codigo_banco'] or ''}" autocomplete="off">
+        <label>ID do usuário (6 dígitos)</label>
+        <input type="text" name="id_usuario" value="{u['id_usuario'] or ''}"
+               pattern="[0-9]{{6}}" title="6 dígitos" autocomplete="off">
+        <label>Status</label>
+        <select name="status">
+          <option>(manter)</option>
+          <option>CRIADO</option>
+          <option>CRIADO MANUALMENTE</option>
+        </select>
+        <p class="mini">Status atual: <b>{u['status']}</b>. Escolha CRIADO ou
+        CRIADO MANUALMENTE para a linha contar na trava de CPF e aparecer nos
+        usuários criados.</p>
+        <button type="submit">Salvar</button>
+        <a class="botao" style="background:#667"
+           href="{url_for('ver_execucao', execucao_id=u['execucao_id'])}">Cancelar</a>
+      </form>
+    </div>
+    """
+    return render(conteudo, aba="historico")
+
+
+@app.route("/criado_manual/<int:usuario_id>", methods=["POST"])
+@exige_login
+def criado_manual(usuario_id):
+    """
+    Marca uma linha que FALHOU como criada MANUALMENTE no Protheus (pedido do
+    usuário em 31/07/2026, caso REGINA da execução 16). A linha vira
+    "CRIADO MANUALMENTE": conta na trava de CPF repetido (LIKE 'CRIADO%'),
+    aparece na tela de usuários criados e os contadores da execução são
+    recalculados. O Protheus não é tocado.
+    """
+    with db() as con:
+        u = con.execute("SELECT * FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
+        if not u:
+            return redirect(url_for("historico"))
+        if str(u["status"] or "").startswith("ERRO"):
+            con.execute(
+                "UPDATE usuarios SET status='CRIADO MANUALMENTE', criado_em=? WHERE id=?",
+                (agora(), usuario_id))
+            con.execute("""UPDATE execucoes SET
+                criados=(SELECT COUNT(*) FROM usuarios x
+                         WHERE x.execucao_id=execucoes.id AND x.status LIKE 'CRIADO%'),
+                erros=(SELECT COUNT(*) FROM usuarios x
+                       WHERE x.execucao_id=execucoes.id AND x.status LIKE 'ERRO%')
+                WHERE id=?""", (u["execucao_id"],))
+            con.execute("UPDATE execucoes SET status='CONCLUIDA' "
+                        "WHERE id=? AND erros=0 AND status='FALHOU'",
+                        (u["execucao_id"],))
+    return redirect(url_for("ver_execucao", execucao_id=u["execucao_id"]))
 
 
 @app.route("/parar_execucao/<int:execucao_id>", methods=["POST"])
@@ -797,14 +922,14 @@ def planilha():
     filial_sel = request.args.get("filial", "")
     with db() as con:
         filiais = [r["filial"] for r in con.execute(
-            "SELECT DISTINCT filial FROM usuarios WHERE status='CRIADO' ORDER BY filial")]
+            "SELECT DISTINCT filial FROM usuarios WHERE status LIKE 'CRIADO%' ORDER BY filial")]
         if filial_sel:
             usuarios = con.execute(
-                "SELECT * FROM usuarios WHERE status='CRIADO' AND filial=? ORDER BY nome",
+                "SELECT * FROM usuarios WHERE status LIKE 'CRIADO%' AND filial=? ORDER BY nome",
                 (filial_sel,)).fetchall()
         else:
             usuarios = con.execute(
-                "SELECT * FROM usuarios WHERE status='CRIADO' ORDER BY filial, nome").fetchall()
+                "SELECT * FROM usuarios WHERE status LIKE 'CRIADO%' ORDER BY filial, nome").fetchall()
     abas = f'<a href="{url_for("planilha")}" class="{"ativa" if not filial_sel else ""}">TODAS</a>'
     for f in filiais:
         cls = "ativa" if f == filial_sel else ""
@@ -816,7 +941,7 @@ def planilha():
       <h2>Usuários criados pela automação</h2>
       <p><a href="{url_for('exportar')}" class="botao">⬇ Exportar Excel</a></p>
       <div class="abas">{abas}</div>
-      {render_tabela(usuarios, apagar=True)}
+      {render_tabela(usuarios, apagar=True, editar=True)}
       <p class="mini">{len(usuarios)} usuário(s) criado(s)
       {'na filial ' + filial_sel if filial_sel else 'no total'}.
       Só aparecem aqui cadastros concluídos com sucesso — os que falharam
@@ -859,7 +984,7 @@ def exportar():
         # exporta o mesmo que a tela "Usuários criados pela automação":
         # só cadastros concluídos com sucesso (STATUS=CRIADO)
         filiais = [r["filial"] for r in con.execute(
-            "SELECT DISTINCT filial FROM usuarios WHERE status='CRIADO' "
+            "SELECT DISTINCT filial FROM usuarios WHERE status LIKE 'CRIADO%' "
             "ORDER BY filial")] or ["(vazio)"]
         for f in filiais:
             ws = wb.create_sheet(title=(f[:31] or "(vazio)"))
@@ -867,7 +992,7 @@ def exportar():
             for c in ws[1]:
                 c.font = Font(bold=True)
                 c.fill = PatternFill("solid", fgColor="DDEBF7")
-            for u in con.execute("SELECT * FROM usuarios WHERE status='CRIADO' "
+            for u in con.execute("SELECT * FROM usuarios WHERE status LIKE 'CRIADO%' "
                                  "AND filial=? ORDER BY nome", (f,)):
                 ws.append([u["nome"], u["cpf"], u["funcao"], u["usuario"], u["senha"],
                            u["senha"], u["grupo_codigo"], u["grupo_nome"],
