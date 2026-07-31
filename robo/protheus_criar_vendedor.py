@@ -1,65 +1,96 @@
 r"""
-Criação de VENDEDORES no Protheus — ⚠️ EM DESENVOLVIMENTO (não é produção).
+Criação de VENDEDORES no Protheus (módulo 97) — ⚠️ EM VALIDAÇÃO.
 
-Roda SEPARADO do robô de usuários, de propósito (decisão do usuário em
-30/07/2026): usa um SEGUNDO Chrome (porta 9223, perfil C:\ChromeProtheus2) e
-uma trava própria (a trava leva a porta no nome), então pode rodar AO MESMO
-TEMPO que o robô de usuários — o Protheus aceita duas sessões do mesmo login
-(AUTO.PROTHEUS) sem derrubar uma à outra.
+Pré-requisito: o USUÁRIO do funcionário já existe (o vendedor usa o código do
+caixa e o ID dele). Regras (ensinadas pelo usuário em 31/07/2026):
+    Nome         = "<código do caixa> - <NOME>"   (ex.: CZY - BRENDA RAMOS PINHEIRO)
+    Nome Reduzid = função                          (ex.: CAIXA/FRENTISTA)
+    CNPJ/CPF     = CPF
+    Cod.Usuario  = ID do usuário (6 dígitos)
+    Filial escolhida no popup "Filiais" ao Incluir; Status padrão 2-Ativo.
 
-NÃO altera nada dos arquivos de produção: reaproveita protheus_ui.py e
-protheus_criar_usuario.py por import/herança. O que for específico da tela
-de vendedores vive AQUI (classe TelaVendedor).
+Usa o MESMO Chrome da produção (9222): descobrimos em 31/07 que uma 2ª
+instância de Chrome trava no "Dicionário de parametros" — a mesma trava de
+execução única serializa este robô com o de usuários.
 
-Teste de sessão (não cria nada):
-    python robo\protheus_criar_vendedor.py --so-sessao
+Modos de teste (não gravam nada):
+    python robo\protheus_criar_vendedor.py --mapear --filial 01ALFA0001
+        (só abre a rotina no módulo 97 e tira um print)
+    python robo\protheus_criar_vendedor.py --teste-preencher --filial ... \
+        --nome "BRENDA RAMOS PINHEIRO" --cpf 999 --funcao CAIXA \
+        --codigo-banco CZY --id-usuario 001288
+        (preenche o formulário e CANCELA)
+Criação real (1 por vez, SÓ com autorização do usuário):
+    ... --criar --filial ... --nome ... --cpf ... --funcao ... \
+        --codigo-banco ... --id-usuario ...
 """
+import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Ambiente PRÓPRIO desta frente (segundo Chrome). Tem de ser definido ANTES
-# de importar o módulo de produção, que lê essas variáveis na importação.
-# Quem quiser apontar para outro lugar pode exportar as variáveis antes.
-os.environ.setdefault("PROTHEUS_CHROME_DEBUG", "127.0.0.1:9223")
-os.environ.setdefault("PROTHEUS_CHROME_USER_DATA", r"C:\ChromeProtheus2")
-
-from protheus_ui import TelaProtheus  # noqa: E402
+from vendedor_ui import TelaVendedor  # noqa: E402
 import protheus_criar_usuario as base  # noqa: E402
 
 
-class TelaVendedor(TelaProtheus):
-    """
-    Camada de tela do CADASTRO DE VENDEDORES.
-    TODO (aguardando mapeamento da tela real com o usuário):
-      - abrir_cadastro_vendedores()  (caminho no menu)
-      - preencher_vendedor(...)      (campos e regras)
-      - confirmar / descartar        (testes SEMPRE descartam até o usuário
-                                      autorizar criação real)
-    """
+def montar_nome_vendedor(codigo_banco, nome):
+    return f"{codigo_banco} - {nome}".strip()
 
 
 def main():
-    import argparse
     parser = argparse.ArgumentParser(
-        description="Robô de vendedores (EM DESENVOLVIMENTO — não usar em produção)")
-    parser.add_argument("--so-sessao", action="store_true",
-                        help="Só abre/loga o Chrome próprio (9223) e confere a sessão.")
+        description="Robô de vendedores (módulo 97) — EM VALIDAÇÃO")
+    parser.add_argument("--filial", required=True)
+    parser.add_argument("--nome")
+    parser.add_argument("--cpf", default="")
+    parser.add_argument("--funcao", default="")
+    parser.add_argument("--codigo-banco", default="")
+    parser.add_argument("--id-usuario", default="")
+    modo = parser.add_mutually_exclusive_group(required=True)
+    modo.add_argument("--mapear", action="store_true",
+                      help="Só abre a rotina Vendedores e tira um print.")
+    modo.add_argument("--teste-preencher", action="store_true",
+                      help="Preenche o formulário e CANCELA (não grava).")
+    modo.add_argument("--criar", action="store_true",
+                      help="Cria de verdade (SÓ com autorização do usuário).")
+    parser.add_argument("--print", dest="print_path", default="",
+                        help="Caminho do screenshot (modos de teste)")
     args = parser.parse_args()
 
-    base.log(f"[vendedor] Chrome em {base.CHROME_DEBUG} | perfil {base.CHROME_USER_DATA}")
     base.adquirir_trava()
     driver = None
     try:
         driver = base.conectar_navegador()
         tela = TelaVendedor(driver, log=base.log)
         base.garantir_sessao(tela)
-        base.log("[vendedor] Sessão OK no Chrome próprio.")
-        if args.so_sessao:
+
+        tela.abrir_cadastro_vendedores(base.GRUPO_EMPRESA, args.filial)
+        base.log("[vendedor] rotina Vendedores aberta (módulo 97).")
+        if args.mapear:
+            if args.print_path:
+                driver.save_screenshot(args.print_path)
             return
-        base.log("[vendedor] TODO: fluxo de vendedor ainda não implementado "
-                 "(falta mapear a tela).")
+
+        if not args.nome:
+            raise SystemExit("--nome é obrigatório neste modo")
+        if not tela.clica_caption("Incluir", exato=True):
+            raise RuntimeError("Botão 'Incluir' de Vendedores não encontrado.")
+        tela.seleciona_filial_popup(args.filial)
+
+        nome_vend = montar_nome_vendedor(args.codigo_banco, args.nome)
+        tela.preencher_vendedor(nome_vend, args.funcao, args.cpf, args.id_usuario)
+        base.log(f"[vendedor] formulário preenchido: {nome_vend!r}")
+        if args.print_path:
+            driver.save_screenshot(args.print_path)
+
+        if args.teste_preencher:
+            ok = tela.cancelar_vendedor()
+            base.log(f"[vendedor] TESTE: formulário descartado (fechou={ok}). Nada foi gravado.")
+            return
+
+        tela.salvar_vendedor()
+        base.log(f"[vendedor] SALVO: {nome_vend}")
     finally:
         base.liberar_trava()
 

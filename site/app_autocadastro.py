@@ -41,6 +41,7 @@ from flask import (Flask, Response, redirect, render_template_string, request,
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "autocadastro.db")
 SCRIPT = os.path.join(BASE_DIR, "robo", "protheus_criar_usuario.py")
+SCRIPT_COMPLETO = os.path.join(BASE_DIR, "robo", "protheus_cadastro_completo.py")
 FILIAIS_PATH = os.path.join(BASE_DIR, "filiais.json")
 
 try:
@@ -175,6 +176,17 @@ def init_db():
             cols = {r["name"] for r in con.execute(f"PRAGMA table_info({tabela})")}
             if "filial_nome" not in cols:
                 con.execute(f"ALTER TABLE {tabela} ADD COLUMN filial_nome TEXT DEFAULT ''")
+        # colunas das etapas 2/3/4 do cadastro completo (31/07/2026):
+        # vendedor (módulo 97), RFID (Identfid) e banco (ajuste do caixa)
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(usuarios)")}
+        for col in ("codigo_vendedor", "status_vendedor", "rfid",
+                    "status_rfid", "status_banco"):
+            if col not in cols:
+                con.execute(f"ALTER TABLE usuarios ADD COLUMN {col} TEXT DEFAULT ''")
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(execucoes)")}
+        if "etapas" not in cols:
+            # 'USUARIO' (padrão) ou 'COMPLETO' (usuário+vendedor+rfid+banco)
+            con.execute("ALTER TABLE execucoes ADD COLUMN etapas TEXT DEFAULT 'USUARIO'")
 
 
 def agora():
@@ -201,8 +213,11 @@ def chrome_conectado():
 # ----------------------------------------------------------------------------
 # EXECUÇÃO
 # ----------------------------------------------------------------------------
-def parse_linhas(texto):
-    """Cada linha: NOME;CPF;FUNÇÃO (aceita TAB — colar do Excel — ou ';')."""
+def parse_linhas(texto, com_rfid=False):
+    """
+    Cada linha: NOME;CPF;FUNÇÃO (aceita TAB — colar do Excel — ou ';').
+    Com `com_rfid`, aceita uma 4ª parte: o número do cartão RFID (opcional).
+    """
     linhas, problemas = [], []
     for n, bruta in enumerate((texto or "").splitlines(), start=1):
         bruta = bruta.strip()
@@ -212,16 +227,26 @@ def parse_linhas(texto):
         if len(partes) < 3:
             problemas.append(f"Linha {n}: preciso de NOME;CPF;FUNÇÃO — recebi: {bruta!r}")
             continue
-        nome, cpf, funcao = partes[0], partes[1], " ".join(partes[2:])
+        if com_rfid:
+            nome, cpf, funcao = partes[0], partes[1], partes[2]
+            rfid = partes[3] if len(partes) > 3 else ""
+        else:
+            nome, cpf, funcao = partes[0], partes[1], " ".join(partes[2:])
+            rfid = ""
         if not so_digitos(cpf):
             problemas.append(f"Linha {n}: CPF sem números: {bruta!r}")
             continue
-        linhas.append({"nome": nome.upper(), "cpf": cpf, "funcao": funcao.upper()})
+        linhas.append({"nome": nome.upper(), "cpf": cpf,
+                       "funcao": funcao.upper(), "rfid": rfid.upper()})
     return linhas, problemas
 
 
 def _grava_resultado(con, r):
-    """Grava o resultado de um usuário (parcial ou final) na linha dele."""
+    """
+    Grava o resultado de um usuário (parcial ou final) na linha dele.
+    As colunas das etapas 2/3/4 só são tocadas quando o robô as informa
+    (cadastro completo) — assim o robô de usuários não apaga nada.
+    """
     con.execute("""
         UPDATE usuarios SET usuario=?, senha=?, grupo_codigo=?, grupo_nome=?,
             prioriza_grupo=?, forcar_troca_senha=?, codigo_banco=?,
@@ -232,18 +257,25 @@ def _grava_resultado(con, r):
          r.get("forcar_troca_senha", ""), r.get("codigo_banco", ""),
          r.get("id_usuario", ""), r.get("status", "ERRO: sem status"),
          agora(), r.get("row_number")))
+    for col in ("codigo_vendedor", "status_vendedor", "rfid",
+                "status_rfid", "status_banco"):
+        if col in r:
+            con.execute(f"UPDATE usuarios SET {col}=? WHERE id=?",
+                        (r[col] or "", r.get("row_number")))
 
 
-def rodar_execucao(execucao_id, pendentes):
+def rodar_execucao(execucao_id, pendentes, etapas="USUARIO"):
     try:
         lote = [{"row_number": u["id"], "nome": u["nome"], "cpf": u["cpf"],
-                 "funcao": u["funcao"], "filial": u["filial"]} for u in pendentes]
+                 "funcao": u["funcao"], "filial": u["filial"],
+                 "rfid": u.get("rfid", "")} for u in pendentes]
         b64 = base64.b64encode(json.dumps(lote).encode("utf-8")).decode("ascii")
+        script = SCRIPT_COMPLETO if etapas == "COMPLETO" else SCRIPT
         # Popen (e não run): o botão "Parar execução" precisa poder matar o
         # robô, e o stdout é lido LINHA A LINHA para atualizar cada usuário na
         # hora ("@@PARCIAL@@{json}" por usuário; a última linha é o JSON final).
         proc = subprocess.Popen(
-            [sys.executable, SCRIPT, "--json-b64", b64],
+            [sys.executable, script, "--json-b64", b64],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", cwd=BASE_DIR)
         _proc_atual.update(execucao_id=execucao_id, proc=proc)
@@ -392,6 +424,7 @@ BASE = """
 <header>
   <h1>AutoCadastro Protheus</h1>
   <a href="{{ url_for('index') }}" class="{{ 'ativo' if aba=='novo' }}">+ Novo cadastro</a>
+  <a href="{{ url_for('completo') }}" class="{{ 'ativo' if aba=='completo' }}">+ Cadastro Completo</a>
   <a href="{{ url_for('historico') }}" class="{{ 'ativo' if aba=='historico' }}">Histórico</a>
   <a href="{{ url_for('planilha') }}" class="{{ 'ativo' if aba=='planilha' }}">Usuários criados pela automação</a>
 </header>
@@ -418,7 +451,8 @@ TABELA_USUARIOS = """
 <div class="rolagem"><table>
 <tr><th>#</th><th>FILIAL</th><th>NOME</th><th>CPF</th><th>FUNÇÃO</th><th>USUARIO</th>
 <th>SENHA</th><th>GRUPO</th><th>GRUPO NOME</th><th>PRIORIZA</th><th>TROCA SENHA</th>
-<th>CÓD. BANCO</th><th>ID USUÁRIO</th><th>STATUS</th><th>QUANDO</th>
+<th>CÓD. BANCO</th><th>ID USUÁRIO</th><th>1·USUÁRIO</th>
+<th>2·VENDEDOR</th><th>3·RFID</th><th>4·BANCO</th><th>QUANDO</th>
 {% if editar %}<th></th>{% endif %}
 {% if apagar %}<th></th>{% endif %}
 {% if marcar_manual %}<th></th>{% endif %}</tr>
@@ -432,6 +466,12 @@ TABELA_USUARIOS = """
   <td>{{ u['forcar_troca_senha'] }}</td><td>{{ u['codigo_banco'] }}</td>
   <td>{{ u['id_usuario'] }}</td>
   <td class="st-{{ classe_status(u['status']) }}">{{ u['status'] }}</td>
+  <td class="st-{{ classe_status(u['status_vendedor']) }}"
+      title="{{ u['status_vendedor'] or '' }}">{{ etapa_txt(u['status_vendedor'], u['codigo_vendedor']) }}</td>
+  <td class="st-{{ classe_status(u['status_rfid']) }}"
+      title="{{ u['status_rfid'] or '' }}">{{ etapa_txt(u['status_rfid'], u['rfid']) }}</td>
+  <td class="st-{{ classe_status(u['status_banco']) }}"
+      title="{{ u['status_banco'] or '' }}">{{ etapa_txt(u['status_banco'], '') }}</td>
   <td>{{ u['criado_em'] or '' }}</td>
   {% if editar %}
   <td><a class="editar" href="{{ url_for('editar_usuario', usuario_id=u['id']) }}"
@@ -470,7 +510,7 @@ SCRIPT_GRADE = """
   var corpo = document.getElementById('grade-corpo');
   var form = document.getElementById('form-criar');
   if (!corpo || !form) return;
-  var COLS = 3;  // NOME, CPF, FUNÇÃO
+  var COLS = __COLS__;  // NOME, CPF, FUNÇÃO [, RFID no cadastro completo]
 
   function inputs(tr) { return tr.querySelectorAll('input'); }
 
@@ -597,10 +637,25 @@ def render(conteudo, aba="", refresh=False):
                                   rodando=rodando, conectado=chrome_conectado())
 
 
+def etapa_txt(status, valor):
+    """Texto curto da coluna de etapa: código quando pronto, resumo se não."""
+    s = (status or "").upper()
+    if not s:
+        return "—"
+    if s.startswith("CRIADO") or s in ("OK", "PRONTO"):
+        return valor or "OK"
+    if s.startswith("ERRO"):
+        return "ERRO"
+    if s.startswith("JÁ") or s.startswith("JA"):
+        return "JÁ EXISTE"
+    return s[:14]
+
+
 def render_tabela(usuarios, apagar=False, marcar_manual=False, editar=False):
     return render_template_string(TABELA_USUARIOS, usuarios=usuarios,
                                   classe_status=classe_status, apagar=apagar,
-                                  marcar_manual=marcar_manual, editar=editar)
+                                  marcar_manual=marcar_manual, editar=editar,
+                                  etapa_txt=etapa_txt)
 
 
 # ----------------------------------------------------------------------------
@@ -658,8 +713,126 @@ def index():
         </p>
       </form>
     </div>
-    """ + SCRIPT_GRADE
+    """ + script_grade(3)
     return render(conteudo, aba="novo")
+
+
+def script_grade(cols):
+    """O JS da grade, para uma tabela de `cols` colunas de dados."""
+    return SCRIPT_GRADE.replace("__COLS__", str(cols))
+
+
+@app.route("/completo")
+@exige_login
+def completo():
+    """
+    Aba "+ Cadastro Completo" (pedido do usuário em 31/07/2026): cola a
+    planilha como no cadastro de usuários e roda as 4 etapas em sequência —
+    usuário (módulo 12) → vendedor (97) → RFID (Identfid) → banco (ajuste do
+    caixa). A 4ª coluna é o número do cartão RFID (opcional: em branco, a
+    etapa 3 é pulada e pode ser feita depois).
+    """
+    filiais = carregar_filiais()
+    opcoes = "".join(
+        f'<option value="{f["codigo"]}">{f["codigo"]} — {f["descricao"]}</option>'
+        for f in filiais)
+    erro = request.args.get("erro", "")
+    conteudo = f"""
+    {f'<div class="erro">{erro}</div>' if erro else ''}
+    <div class="cartao">
+      <h2>Cadastro completo — usuário + vendedor + RFID + banco</h2>
+      <p class="mini">As 4 etapas do manual, em sequência, para cada pessoa:
+      <b>1)</b> usuário no módulo 12 (gera código do caixa e ID);
+      <b>2)</b> vendedor no módulo 97 (<code>&lt;cód. caixa&gt; - NOME</code>,
+      função no Nome Reduzid, CPF, Cod.Usuario = ID);
+      <b>3)</b> RFID no Identfid (cartão → vendedor), se você informar o cartão;
+      <b>4)</b> banco (Bco Oficial 000, Tipo Conta = Caixa, Rat. Dif. Cx. = Sim).
+      Cada etapa só roda se a anterior deu certo.</p>
+      <form method="post" action="{url_for('criar_completo')}" id="form-criar">
+        <label>Filial — código do Protheus (ex.: 01ALFA0001)</label>
+        <input type="text" name="filial" list="filiais" required
+               autocomplete="off" placeholder="01ALFA0001"
+               pattern="[0-9A-Za-z]{{6,20}}">
+        <datalist id="filiais">{opcoes}</datalist>
+        <label>Funcionários — cole do Excel direto na tabela
+        (NOME · CPF · FUNÇÃO · CARTÃO RFID)</label>
+        <div class="rolagem">
+          <table class="grade" id="grade">
+            <thead><tr>
+              <th style="width:38px">#</th><th>NOME</th>
+              <th style="width:160px">CPF</th><th style="width:190px">FUNÇÃO</th>
+              <th style="width:210px">CARTÃO RFID (opcional)</th>
+              <th style="width:38px"></th>
+            </tr></thead>
+            <tbody id="grade-corpo"></tbody>
+          </table>
+        </div>
+        <input type="hidden" name="linhas" id="linhas">
+        <button type="submit">▶ Rodar cadastro completo</button>
+        <p class="mini">Sem o cartão RFID a etapa 3 fica como
+        <b>PENDENTE RFID</b> e pode ser rodada depois; as etapas 1, 2 e 4
+        seguem normalmente. O ritmo é o do Protheus: conte alguns minutos por
+        pessoa (o Salvar do vendedor sozinho leva ~4 min neste servidor).</p>
+      </form>
+    </div>
+    """ + script_grade(4)
+    return render(conteudo, aba="completo")
+
+
+@app.route("/criar_completo", methods=["POST"])
+@exige_login
+def criar_completo():
+    """Mesma mecânica de /criar, com etapas='COMPLETO' e a coluna RFID."""
+    filial = (request.form.get("filial") or "").strip().upper()
+    if not re.fullmatch(r"[0-9A-Z]{6,20}", filial or ""):
+        return redirect(url_for("completo", erro=(
+            f"{filial!r} não parece um código de filial do Protheus.")))
+    linhas, problemas = parse_linhas(request.form.get("linhas"), com_rfid=True)
+    if problemas:
+        return redirect(url_for("completo", erro=" | ".join(problemas[:5])))
+    if not linhas:
+        return redirect(url_for("completo", erro="Nenhuma linha válida."))
+    if not _trava_execucao.acquire(blocking=False):
+        return redirect(url_for("completo",
+                                erro="Já existe uma execução em andamento — aguarde."))
+
+    filial_nome = nome_da_filial(filial)
+    try:
+        with db() as con:
+            cur = con.execute(
+                "INSERT INTO execucoes (iniciada, filial, filial_nome, etapas) "
+                "VALUES (?,?,?,'COMPLETO')", (agora(), filial, filial_nome))
+            execucao_id = cur.lastrowid
+            pendentes = []
+            for u in linhas:
+                repetido = con.execute(
+                    "SELECT usuario FROM usuarios WHERE status LIKE 'CRIADO%' AND "
+                    "replace(replace(replace(cpf,'.',''),'-',''),' ','')=?",
+                    (so_digitos(u["cpf"]),)).fetchone()
+                status = "PROCESSANDO"
+                quando = None
+                if repetido:
+                    status = f"JÁ EXISTE (login {repetido['usuario']})"
+                    quando = agora()
+                cur = con.execute(
+                    "INSERT INTO usuarios (execucao_id, filial, filial_nome, nome, cpf, "
+                    "funcao, rfid, status, criado_em) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (execucao_id, filial, filial_nome, u["nome"], u["cpf"],
+                     u["funcao"], u.get("rfid", ""), status, quando))
+                if not repetido:
+                    pendentes.append({"id": cur.lastrowid, "filial": filial, **u})
+        if pendentes:
+            threading.Thread(target=rodar_execucao,
+                             args=(execucao_id, pendentes, "COMPLETO"),
+                             daemon=True).start()
+        else:
+            with db() as con:
+                _finalizar(con, execucao_id, "CONCLUIDA")
+            _trava_execucao.release()
+    except Exception:
+        _trava_execucao.release()
+        raise
+    return redirect(url_for("ver_execucao", execucao_id=execucao_id))
 
 
 @app.route("/criar", methods=["POST"])

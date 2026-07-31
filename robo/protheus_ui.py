@@ -301,6 +301,22 @@ function acha(raiz) {
 return acha(document);
 """
 
+# existe alguma ABA de rotina aberta? (caption tipo 'Vendedores [02.9.0097]')
+JS_TEM_ABA_ROTINA = r"""
+function acha(raiz) {
+  for (const el of raiz.querySelectorAll('*')) {
+    const cap = el.getAttribute && el.getAttribute('caption');
+    if (cap && cap.includes('[02.')) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return true;
+    }
+    if (el.shadowRoot) { if (acha(el.shadowRoot)) return true; }
+  }
+  return false;
+}
+return acha(document);
+"""
+
 # fecha a aba de uma rotina aberta (ex.: "Usuários [02.9.0012]") clicando no X
 JS_FECHA_ABA_ROTINA = r"""
 function achaAba(raiz) {
@@ -771,7 +787,10 @@ class TelaProtheus:
 
             ativo = self.driver.switch_to.active_element
             atual = self.driver.execute_script("return arguments[0].value || '';", ativo)
-            if atual.strip():
+            # limpar também conteúdo SÓ de espaços: o form de vendedor vem com
+            # um buffer de 40 espaços no campo, e o strip() aqui deixava os
+            # espaços na frente ("Retire o espaço em branco da 1ª posição")
+            if atual:
                 ativo.send_keys(Keys.END)
                 for _ in range(len(atual)):
                     ativo.send_keys(Keys.BACK_SPACE)
@@ -998,6 +1017,37 @@ class TelaProtheus:
             time.sleep(5)
             if not self.no_dialogo_contexto():
                 raise RuntimeError("A janelinha de contexto não abriu.")
+
+        # Atalho: o diálogo pode JÁ estar aberto com os valores certos (ex.:
+        # contexto re-pedido ao abrir uma rotina, sobra de tentativa anterior).
+        # Nesse estado os campos podem vir BLOQUEADOS — digitar neles dá
+        # "element not interactable" (aconteceu no mapeamento de Vendedores,
+        # 31/07/2026). Se filial e ambiente já são os pedidos, só confirma.
+        try:
+            if (self._contexto_valor(self.IDX_FILIAL) == str(filial_codigo)
+                    and self._contexto_valor(self.IDX_AMBIENTE) == str(ambiente)):
+                self.log("  contexto já está com os valores certos — só confirmando")
+                desc = self._contexto_valor(self.IDX_FILIAL_DESC)
+                if desc:
+                    self.ultima_filial_nome = desc
+                if not self.clica_caption("Confirmar", exato=True):
+                    raise RuntimeError("Botão 'Confirmar' do contexto não encontrado.")
+                # esse diálogo pode ser o contexto RE-PEDIDO por uma rotina:
+                # confirmar abre a ROTINA direto, e aí 'Trocar módulo' nem
+                # existe — aceitar também uma aba de rotina como sucesso
+                fim = time.time() + 180
+                while time.time() < fim:
+                    self.fecha_dialogos(tentativas=1)
+                    if self._js(JS_TEM_TROCAR_MODULO) or self._js(JS_TEM_ABA_ROTINA):
+                        time.sleep(2)
+                        return
+                    time.sleep(3)
+                raise RuntimeError(
+                    "Depois de confirmar o contexto a tela não carregou.")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            self.log(f"  (atalho do contexto falhou, seguindo o caminho normal: {e})")
 
         # os campos do diálogo, na ordem: 1 Data base, 2 Grupo, 4 Filial, 6 Ambiente
         self._dialogo_contexto_preenche(grupo, filial_codigo, ambiente)

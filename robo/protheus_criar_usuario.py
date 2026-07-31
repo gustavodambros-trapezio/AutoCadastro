@@ -48,7 +48,7 @@ from selenium.webdriver.common.keys import Keys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from protheus_ui import (TelaProtheus, FilialInvalida,  # noqa: E402
-                         JS_TEM_TROCAR_MODULO)
+                         JS_TEM_TROCAR_MODULO, JS_TEM_ABA_ROTINA)
 
 # ----------------------------------------------------------------------------
 # CONFIGURAÇÃO
@@ -328,8 +328,13 @@ def garantir_sessao(tela, espera_carregar=90):
             estado = "selecao"
             break
         tela._no_principal()
-        if tela._js(JS_TEM_TROCAR_MODULO) or tela.tem_texto("Controle de Lojas"):
-            return          # módulo no ar (com ou sem rotina aberta)
+        # módulo no ar: menu lateral ('Trocar módulo'), OU uma rotina aberta
+        # (aba [02.x] — nesse estado o menu não existe), OU o título de um
+        # módulo conhecido (12=Controle de Lojas, 97=Posto Inteligente)
+        if (tela._js(JS_TEM_TROCAR_MODULO) or tela._js(JS_TEM_ABA_ROTINA)
+                or tela.tem_texto("Controle de Lojas")
+                or tela.tem_texto("Posto Inteligente")):
+            return
         log("  página do Protheus ainda carregando...")
         time.sleep(3)
     if not estado:

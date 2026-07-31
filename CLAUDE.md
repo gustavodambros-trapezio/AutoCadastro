@@ -74,6 +74,46 @@ não use sem o usuário pedir.
 
 ## Frente nova: criar VENDEDOR a partir do usuário (iniciada 30/07/2026)
 
+**Cadeia de dependência (regra do usuário, 31/07) — 4 PASSOS:**
+1. **USUÁRIO** (módulo 12) → gera **código do caixa** (3 car.) e **ID** (6 díg.)
+2. **VENDEDOR** (módulo 97 → Atualizações → Cadastros → Vendedores; usa código
+   do caixa no Nome + ID em Cod.Usuario) → gera **código do vendedor** (6 díg.)
+3. **RFID** (módulo 97 → Atualizações → Controle de Combustíveis → Identfid;
+   usa o código do vendedor)
+4. **BANCO** (módulo 97 → Atualizações → Cadastros → **Bancos**): pesquisar
+   **por COLUNA "Codigo"** (o seletor de pesquisa tem aba Chave/Coluna — ver
+   print) com o **código do caixa** (ex.: CBK), **Alterar** e:
+   - aba **Cadastrais**: `Bco Oficial` = **000**
+   - aba **Contábil**: `Tipo Conta` = **1 - Caixa** → Confirmar/Salvar
+   - aba **Outros**: `Rat. Dif. Cx.` = **S - Sim** → Salvar
+   Obs.: o registro do banco JÁ EXISTE (o Protheus cria junto com o usuário —
+   Nome Banco vem tipo `SMARTPOS04.01AMEC0001`); o passo 4 é **ALTERAR**,
+   nunca incluir. Botões desta tela: Fechar / Salvar e Criar Novo / Confirmar.
+
+Cada etapa exige a anterior concluída.
+
+**FEITO (31/07): aba "+ Cadastro Completo"** no site + robô das 4 etapas.
+- Site: rota `/completo` (grade NOME·CPF·FUNÇÃO·**CARTÃO RFID**, a 4ª coluna
+  é opcional) e `/criar_completo` → grava `execucoes.etapas='COMPLETO'` e
+  chama `robo/protheus_cadastro_completo.py`. `parse_linhas(com_rfid=True)`.
+- Banco do site: colunas novas em `usuarios` — `codigo_vendedor`,
+  `status_vendedor`, `rfid`, `status_rfid`, `status_banco` (migração
+  automática no `init_db`), e `execucoes.etapas`.
+- Tabelas do site mostram **4 colunas de etapa** (1·USUÁRIO, 2·VENDEDOR,
+  3·RFID, 4·BANCO) com o código quando pronto e o erro no `title` (hover);
+  atualização em tempo real por `@@PARCIAL@@` como antes.
+- Robô: `robo/protheus_cadastro_completo.py` roda **por FASES** (todos os
+  usuários no 12 → troca uma vez para o 97 → vendedores → RFIDs → bancos).
+  ⚠️ Escolha deliberada: numa única sessão o pipeline "vendedor da pessoa 1
+  enquanto cria o usuário 2" é inviável (cada troca de módulo custa ~1 min);
+  o pipeline verdadeiro depende da engenharia das N ABAS (e de mais RAM).
+  A cadeia é respeitada por pessoa: etapa n+1 só roda se a n deu certo.
+- Robô: `robo/banco_ui.py` (`TelaPosto`) com `abrir_identfid`/`criar_rfid` e
+  `abrir_bancos`/`ajustar_banco_do_caixa`. ⚠️ Para os combos da tela de
+  Bancos usei `seleciona_combo_do_label()` — o `seleciona_combo()` global
+  pegaria o PRIMEIRO combo com "Sim" da tela, e a aba Outros tem vários
+  (Gerente?, Rat.Dif.Cx., Integra, CIFA Ativo?).
+
 Decisões do usuário:
 - Desenvolver **sem tocar no código de produção** (usuários). O robô novo é
   `robo/protheus_criar_vendedor.py`, que reusa `protheus_ui.py` por HERANÇA
@@ -117,9 +157,90 @@ Decisões do usuário:
   (d) validar clique/tecla em ABA EM SEGUNDO PLANO (CDP entrega eventos a
   aba sem foco, mas o Chrome estrangula timers de aba de fundo — testar com
   criação real; talvez `--disable-background-timer-throttling`).
-- FALTA: mapear a tela de Cadastro de Vendedores (rotina no menu, campos,
-  regras — perguntar ao usuário) e implementar preencher/confirmar com a
-  regra de testes = preencher e DESCARTAR até autorização.
+- **Fluxo ensinado pelo usuário (31/07, com prints):** módulo **97 - Posto
+  Inteligente** → Atualizações → Cadastros → Vendedores → Incluir → popup
+  "Filiais" (a pesquisa DESTE popup funciona: digitar o código completo,
+  ex.: 01LVER0007, e OK) → formulário "Atualização de Vendedores", aba
+  Vendas: **Codigo** automático (não mexer) · **Nome** = "<código do caixa>
+  - <NOME>" (ex.: `CZY - BRENDA RAMOS PINHEIRO`) · **Nome Reduzid** = função
+  (ex.: CAIXA/FRENTISTA) · **CNPJ/CPF** = CPF · **Cod.Usuario** = ID do
+  usuário 6 dígitos (ex.: 001288 — conforme o print; o texto do usuário
+  citou "C22", mas o print mostra o ID) · Status padrão 2-Ativo → Salvar.
+  Pré-requisito: o USUÁRIO já criado (código do caixa + ID vêm dele).
+- **Decisão (31/07):** o robô de vendedor usa o MESMO Chrome da produção
+  (9222) — 2º Chrome não funciona (trava do Dicionário) — e por isso a
+  mesma trava serializa usuários × vendedores por enquanto (paralelo de
+  verdade = engenharia das N abas, ainda não feita).
+- Implementado: `robo/vendedor_ui.py` (TelaVendedor: abrir rotina no 97,
+  popup Filiais, preencher, salvar/cancelar) e
+  `robo/protheus_criar_vendedor.py` (CLI com --mapear / --teste-preencher
+  que CANCELA / --criar). **Usuário AUTORIZOU (31/07) criar os vendedores
+  do pessoal da 01ALFA0001** ("ainda não foram criados" — obs.: o browse
+  mostra vendedores antigos 000001-000018 com nomes SEM o prefixo de código;
+  o usuário considera que os novos não existem).
+- **Armadilhas da tela de vendedor descobertas no mapeamento (31/07):**
+  (a) o título vem com charset antigo — "Atualizaçäo de Vendedores" com ä —
+  nunca casar texto por acento; usar marcadores: browse = "Exibir Todos",
+  formulário = label "Cod.Usuario"; (b) o popup Filiais fecha SOZINHO com
+  código + ENTER na pesquisa (o OK muitas vezes nem existe mais); (c) os
+  campos do formulário só aceitam digitação no campo FOCADO (preenche()
+  direto deixa espaço na 1ª posição e o Protheus recusa) — usar
+  preenche_por_tab; (d) o campo CNPJ/CPF tem MÁSCARA: conferir só dígitos, e
+  completar CPF com zeros à esquerda até 11 (planilhas comem o zero);
+  (e) menu: "Cadastros (33)" com contagem no caption — clicar por trecho;
+  (f) ao abrir a rotina o contexto é re-pedido, e com rotina aberta 'Trocar
+  módulo' não existe — trocar_modulo ganhou atalho "valores certos → só
+  confirmar" + aceita aba de rotina como sinal de tela pronta
+  (JS_TEM_ABA_ROTINA);
+  (g) **a BARRA "/" é engolida** por estes campos ("CAIXA/FRENTISTA" virava
+  "CAIXAFRENTISTA"). Testei 4 formas ao vivo: **`Keys.DIVIDE` (barra do
+  teclado numérico) funciona**; CDP `dispatchKeyEvent` duplica a barra;
+  `Input.insertText` funciona; ActionChains perde. Está em
+  `_preenche_devagar()`, que digita caractere por caractere e confere;
+  (h) os campos vêm com **buffer de espaços** (Nome tem 40) — a limpeza tem
+  de apagar `len(valor)` mesmo quando é só espaço (`if atual:`, não
+  `if atual.strip():`), senão o Protheus recusa com "Retire o espaço em
+  branco da primeira posição"; o campo Nome corta em 40 caracteres;
+  (i) **o Salvar do vendedor leva MAIS DE 4 MINUTOS** neste servidor — os 3
+  primeiros gravaram e o robô só perdeu a confirmação por timeout. Teto agora
+  600s, e a confirmação forte é ler o **código do vendedor** na linha do
+  browse (`salvar_vendedor` devolve o código; mesmo espírito do ID
+  obrigatório dos usuários).
+
+### Vendedores criados na 01ALFA0001 (31/07, autorizado pelo usuário)
+
+| Usuário | Vendedor | Cód. vendedor |
+|---|---|---|
+| ALEXSANDRO.SANTOS | D06 - ALEXSANDRO GONÇALVES DOS SANTOS | 000020 |
+| CLEYTON.NARCISO | D07 - CLEYTON DE OLIVEIRA NARCISO | 000021 |
+| DANIELE.VENANCIO | D08 - DANIELE ADRIELI VITORIA VENANCIO | 000022 |
+
+Os 11 restantes (D09-D19) estavam sendo criados em lote quando esta nota foi
+escrita (~5 min cada). Script do lote:
+`scratchpad/cria_vendedores_alfa.py --pular N`.
+⚠️ **RFID dos ALFA está BLOQUEADO por falta de dado**: o Identfid precisa do
+**número do cartão físico** (ex.: 8598ECD52A6B6C3D) e isso não está em
+nenhuma planilha nossa — pedir ao usuário. O passo 4 (banco) não depende de
+nada externo e pode rodar logo após os vendedores.
+- **PEDIDO DO USUÁRIO (31/07): tela "+ Cadastrar RFID"** (fazer DEPOIS do
+  vendedor). Fluxo ensinado com prints — módulo 97, rotina
+  **Atualizações → Controle de Combustíveis → Identfid** ("Cadastro de
+  Identificadores"): browse com Filial | Codigo | Num. Cartao | Vendedor |
+  Nome | Concentrador (a pesquisa aceita o nº do cartão, ex.:
+  8598ECD52A6B6C3D). Formulário: Codigo automático · **Num. Cartao** = RFID ·
+  **Vendedor** = código do vendedor (lupa; o Nome resolve sozinho, ex.:
+  "CB0 - MARINA...") · Concentrador = 001 · Preço Nível 0-Dinheiro · Status
+  1-Ativado · turnos em branco → Confirmar. O cartão também aparece no campo
+  **Cod RF ID** da aba **Outros** do cadastro do vendedor (print de Alterar)
+  — ⚠️ CONFIRMAR com o usuário se é preenchido à mão nos dois lugares ou se
+  o Identfid alimenta o vendedor sozinho. Pré-requisitos: usuário + vendedor
+  já criados.
+- PEDIDO DO USUÁRIO (31/07, ainda não construído no site): aba
+  "+ Novo vendedor" ao lado do novo cadastro — colar planilha OU selecionar
+  usuários já criados; e opção na execução de USUÁRIOS para já criar o
+  vendedor de cada um na sequência (design provável: robô cria todos os
+  usuários no módulo 12 e depois troca para o 97 e cria os vendedores do
+  lote, para não ficar trocando de módulo a cada pessoa).
 
 ## Regras de negócio (confirmadas pelo usuário)
 
@@ -419,6 +540,20 @@ usuário `ADMIN`). Tudo abaixo está **feito e testado**:
   não apareceu na grade" (checagem única e apressada da grade — corrigida em
   31/07 com espera de até 8s + até 2 redigitações em `preenche_grupo`).
   REGINA foi criada MANUALMENTE pelo usuário no Protheus.
+- **Lápis ✎ de editar linha** (31/07, pedido do usuário): em cada linha da
+  tela da execução e da tela de usuários criados, abre um formulário para
+  corrigir **login, código do banco, ID e status** (só o banco do site; o
+  Protheus não é tocado). Uso típico: registrar dados apurados manualmente
+  (caso FRANCELISE — os valores D25/001316 que eu tinha inferido estavam
+  ERRADOS, o usuário vai preencher os certos pelo lápis). Ao salvar, os
+  contadores da execução são recalculados e, se os erros zerarem, a execução
+  FALHOU vira CONCLUIDA (mesma promoção no botão de criado manualmente).
+- **GitHub**: repositório em
+  https://github.com/gustavodambros-trapezio/AutoCadastro (privado da org).
+  Primeiro push feito pelo usuário em 31/07; segundo commit (regra SMART,
+  botões, fixes) enviado na sequência. `.gitignore` mantém fora: `.env`,
+  `protheus_config.json`, `autocadastro.db`. Git instalado via winget nesta
+  máquina (`C:\Program Files\Git\cmd`).
 - **Botão "✓ Usuário foi criado manualmente"** (31/07, pedido do usuário):
   aparece ao lado de cada linha com ERRO na tela da execução (quando não
   está rodando). Rota POST `/criado_manual/<id>`: status vira
