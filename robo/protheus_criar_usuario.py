@@ -318,6 +318,17 @@ def garantir_sessao(tela, espera_carregar=90):
     "Botão 'Trocar módulo' não encontrado"). Por isso primeiro esperamos até
     conseguir AFIRMAR em que tela estamos: login, seleção de contexto ou
     módulo carregado."""
+    # sessão derrubada por inatividade? o aviso "esta sessão foi encerrada por
+    # inatividade / Clique aqui para voltar ao início" congela a tela — o
+    # caminho seguro é recarregar a página e logar de novo (31/07/2026)
+    try:
+        if tela.sessao_expirada():
+            log("  sessão expirada por inatividade — recarregando e relogando")
+            tela.driver.get(PROTHEUS_URL)
+            time.sleep(8)
+    except Exception:
+        pass
+
     fim = time.time() + espera_carregar
     estado = ""
     while time.time() < fim:

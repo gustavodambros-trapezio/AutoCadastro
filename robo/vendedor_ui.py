@@ -23,6 +23,12 @@ from protheus_ui import TelaProtheus
 MODULO_VENDEDORES = "97"   # Posto Inteligente
 
 
+class SessaoExpirada(RuntimeError):
+    """O Protheus encerrou a sessão por inatividade no meio da operação.
+    ⚠️ O registro pode ter sido gravado — CONFERIR antes de tentar de novo,
+    para não duplicar."""
+
+
 class TelaVendedor(TelaProtheus):
 
     def abrir_cadastro_vendedores(self, grupo, filial, ambiente=MODULO_VENDEDORES):
@@ -263,6 +269,11 @@ class TelaVendedor(TelaProtheus):
         # teto generoso de 10 min, medido em 31/07/2026
         fim = time.time() + 600
         while time.time() < fim:
+            self.manter_vivo()          # a sessão morre por inatividade se esperarmos quietos
+            if self.sessao_expirada():
+                raise SessaoExpirada(
+                    "a sessão caiu por inatividade durante o Salvar do vendedor "
+                    f"{nome_vendedor!r} — o registro pode ter sido GRAVADO")
             self.fecha_popup_com_texto("sucesso")
             cod = self.codigo_vendedor_na_lista(nome_vendedor)
             if cod:

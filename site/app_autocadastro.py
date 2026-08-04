@@ -187,6 +187,30 @@ def init_db():
         if "etapas" not in cols:
             # 'USUARIO' (padrão) ou 'COMPLETO' (usuário+vendedor+rfid+banco)
             con.execute("ALTER TABLE execucoes ADD COLUMN etapas TEXT DEFAULT 'USUARIO'")
+        # OPERAÇÕES ÚNICAS (31/07/2026, decisão do usuário): as telas avulsas
+        # (usuário / vendedor / RFID / banco) são INDEPENDENTES — não têm trava
+        # de CPF, não se ligam a nenhum registro e não entram na planilha de
+        # usuários criados. Por isso vivem em tabela própria.
+        con.executescript("""
+        CREATE TABLE IF NOT EXISTS operacoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lote_id INTEGER NOT NULL,
+            tipo TEXT NOT NULL,            -- USUARIO | VENDEDOR | RFID | BANCO
+            filial TEXT NOT NULL,
+            entrada TEXT NOT NULL,         -- o que foi digitado (JSON)
+            resultado TEXT DEFAULT '',     -- códigos gerados (JSON)
+            status TEXT NOT NULL DEFAULT 'PROCESSANDO',
+            quando TEXT
+        );
+        CREATE TABLE IF NOT EXISTS lotes_op (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,
+            filial TEXT NOT NULL,
+            iniciada TEXT NOT NULL,
+            finalizada TEXT,
+            status TEXT NOT NULL DEFAULT 'RODANDO'
+        );
+        """)
 
 
 def agora():
@@ -268,14 +292,23 @@ def rodar_execucao(execucao_id, pendentes, etapas="USUARIO"):
     try:
         lote = [{"row_number": u["id"], "nome": u["nome"], "cpf": u["cpf"],
                  "funcao": u["funcao"], "filial": u["filial"],
-                 "rfid": u.get("rfid", "")} for u in pendentes]
+                 "rfid": u.get("rfid", ""), "usuario": u.get("usuario", ""),
+                 "codigo_banco": u.get("codigo_banco", ""),
+                 "id_usuario": u.get("id_usuario", ""),
+                 "codigo_vendedor": u.get("codigo_vendedor", "")}
+                for u in pendentes]
         b64 = base64.b64encode(json.dumps(lote).encode("utf-8")).decode("ascii")
-        script = SCRIPT_COMPLETO if etapas == "COMPLETO" else SCRIPT
+        # etapas: 'USUARIO' (robô antigo), 'COMPLETO' (4 etapas) ou uma etapa
+        # avulsa ('VENDEDOR' / 'RFID' / 'BANCO')
+        script = SCRIPT if etapas == "USUARIO" else SCRIPT_COMPLETO
+        extra = []
+        if etapas not in ("USUARIO", "COMPLETO"):
+            extra = ["--etapas", etapas]
         # Popen (e não run): o botão "Parar execução" precisa poder matar o
         # robô, e o stdout é lido LINHA A LINHA para atualizar cada usuário na
         # hora ("@@PARCIAL@@{json}" por usuário; a última linha é o JSON final).
         proc = subprocess.Popen(
-            [sys.executable, script, "--json-b64", b64],
+            [sys.executable, script, "--json-b64", b64] + extra,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", cwd=BASE_DIR)
         _proc_atual.update(execucao_id=execucao_id, proc=proc)
@@ -405,6 +438,10 @@ ESTILO = """
   button.manual:hover { background: #dfe7ee; }
   a.editar { text-decoration: none; padding: 3px 7px; border-radius: 3px; color: #0c3c60; }
   a.editar:hover { background: #dfe7ee; }
+  nav.submenu { background: #e8eef4; padding: 8px 24px; display: flex; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid #d7dde2; }
+  nav.submenu a { color: #0c3c60; text-decoration: none; font-size: 13px; padding: 3px 8px; border-radius: 4px; }
+  nav.submenu a:hover { background: #d3dee8; }
+  nav.submenu a.on { background: #0c3c60; color: #fff; font-weight: bold; }
   button.apagar { background: none; border: 0; color: #b33; cursor: pointer; margin: 0; padding: 5px 8px; font-size: 15px; line-height: 1; }
   button.apagar:hover { background: #ffd8d8; border-radius: 3px; }
   form.form-apagar { margin: 0; display: inline; }
@@ -423,11 +460,20 @@ BASE = """
 <body>
 <header>
   <h1>AutoCadastro Protheus</h1>
-  <a href="{{ url_for('index') }}" class="{{ 'ativo' if aba=='novo' }}">+ Novo cadastro</a>
-  <a href="{{ url_for('completo') }}" class="{{ 'ativo' if aba=='completo' }}">+ Cadastro Completo</a>
-  <a href="{{ url_for('historico') }}" class="{{ 'ativo' if aba=='historico' }}">Histórico</a>
-  <a href="{{ url_for('planilha') }}" class="{{ 'ativo' if aba=='planilha' }}">Usuários criados pela automação</a>
+  <a href="{{ url_for('completo') }}" class="{{ 'ativo' if aba in ('completo','historico','planilha','novo') }}">+ Cadastro Completo</a>
+  <a href="{{ url_for('operacao', tipo='usuario') }}" class="{{ 'ativo' if aba=='op-usuario' }}">Criar usuário</a>
+  <a href="{{ url_for('operacao', tipo='vendedor') }}" class="{{ 'ativo' if aba=='op-vendedor' }}">Criar vendedor</a>
+  <a href="{{ url_for('operacao', tipo='rfid') }}" class="{{ 'ativo' if aba=='op-rfid' }}">Criar RFID</a>
+  <a href="{{ url_for('operacao', tipo='banco') }}" class="{{ 'ativo' if aba=='op-banco' }}">Criar banco</a>
 </header>
+{% if aba in ('completo','historico','planilha','novo') %}
+<nav class="submenu">
+  <a href="{{ url_for('completo') }}" class="{{ 'on' if aba=='completo' }}">Novo cadastro completo</a>
+  <a href="{{ url_for('index') }}" class="{{ 'on' if aba=='novo' }}">Só usuários (com trava de CPF)</a>
+  <a href="{{ url_for('historico') }}" class="{{ 'on' if aba=='historico' }}">Histórico de execuções</a>
+  <a href="{{ url_for('planilha') }}" class="{{ 'on' if aba=='planilha' }}">Usuários criados pela automação</a>
+</nav>
+{% endif %}
 <main>
 {% if not conectado %}
   <div class="aviso">ℹ️ O Chrome do robô está fechado — <b>sem problema</b>:
@@ -597,9 +643,9 @@ SCRIPT_GRADE = """
       if (v.some(function (x) { return x === ''; })) incompletas.push(i + 1);
       saida.push(v.join(';'));
     });
-    if (incompletas.length) {
+    if (incompletas.length && !form.dataset.permiteVazio) {
       e.preventDefault();
-      alert('Preencha NOME, CPF e FUNÇÃO na(s) linha(s): ' + incompletas.join(', '));
+      alert('Preencha todas as colunas na(s) linha(s): ' + incompletas.join(', '));
       return;
     }
     if (!saida.length) {
@@ -611,6 +657,19 @@ SCRIPT_GRADE = """
   });
 
   for (var i = 0; i < 5; i++) novaLinha();
+
+  // pré-carregar linhas (páginas de etapa avulsa: pendentes da filial)
+  var pre = document.getElementById('pre');
+  if (pre && pre.value.trim()) {
+    pre.value.split('\\n').forEach(function (linha, i) {
+      var tr = corpo.rows[i] || novaLinha();
+      var ins = inputs(tr);
+      linha.split(';').forEach(function (v, j) {
+        if (j < COLS) ins[j].value = v.trim();
+      });
+    });
+    garanteVazia();
+  }
 })();
 </script>
 """
@@ -779,6 +838,370 @@ def completo():
     return render(conteudo, aba="completo")
 
 
+# ---------------------------------------------------------------------------
+# OPERAÇÕES ÚNICAS — telas INDEPENDENTES (decisão do usuário, 31/07/2026)
+#
+# Cada uma faz UMA coisa só, em QUALQUER filial digitada, e é totalmente
+# desligada do resto do site: SEM trava de CPF, SEM vínculo com registros
+# existentes, SEM entrar na planilha de "usuários criados pela automação".
+# Só as colunas que o Protheus precisa para aquela operação. O histórico
+# delas vive nas tabelas próprias `lotes_op` / `operacoes`.
+# Quem encadeia as 4 etapas (e mantém as travas) é só o Cadastro Completo.
+# ---------------------------------------------------------------------------
+OPERACOES = {
+    "usuario": {
+        "titulo": "Criar usuário (operação única)",
+        "cols": ["NOME COMPLETO", "FUNÇÃO"],
+        "campos": ["nome", "funcao"],
+        "etapa": "USUARIO",
+        "ajuda": ("Cria só o usuário no módulo 12. Login "
+                  "<code>PRIMEIRO.ULTIMO</code> (cascata se existir; regra SMART "
+                  "POS quando o nome começa com número), senha "
+                  "<code>Grupo@2026</code>, grupo pela função (GERENTE ou LIDER "
+                  "DE LOJA → 000013, o resto → 000012). Devolve o código do "
+                  "caixa e o ID."),
+    },
+    "vendedor": {
+        "titulo": "Criar vendedor (operação única)",
+        "cols": ["CÓD. CAIXA", "NOME COMPLETO", "FUNÇÃO", "CPF", "ID USUÁRIO"],
+        "campos": ["codigo_banco", "nome", "funcao", "cpf", "id_usuario"],
+        "etapa": "VENDEDOR",
+        "ajuda": ("Cria só o vendedor no módulo 97: Nome = "
+                  "<code>&lt;CÓD. CAIXA&gt; - NOME</code>, Nome Reduzid = FUNÇÃO, "
+                  "CNPJ/CPF = CPF, Cod.Usuario = ID USUÁRIO. Devolve o código "
+                  "do vendedor."),
+    },
+    "rfid": {
+        "titulo": "Cadastrar RFID (operação única)",
+        "cols": ["CÓD. VENDEDOR", "CARTÃO RFID"],
+        "campos": ["codigo_vendedor", "rfid"],
+        "etapa": "RFID",
+        "ajuda": ("Vincula o cartão ao vendedor no Identfid (módulo 97): "
+                  "Num. Cartao = CARTÃO, Vendedor = CÓD. VENDEDOR, "
+                  "Concentrador 001, Preço Nível 0-Dinheiro, Status 1-Ativado."),
+    },
+    "banco": {
+        "titulo": "Ajustar banco do caixa (operação única)",
+        "cols": ["CÓD. CAIXA"],
+        "campos": ["codigo_banco"],
+        "etapa": "BANCO",
+        "ajuda": ("Altera o banco que o Protheus criou junto com o usuário: "
+                  "aba Cadastrais <b>Bco Oficial = 000</b>, aba Contábil "
+                  "<b>Tipo Conta = 1 - Caixa</b>, aba Outros "
+                  "<b>Rat. Dif. Cx. = S - Sim</b>."),
+    },
+}
+
+
+def _lote_op_rodando():
+    with db() as con:
+        return con.execute("SELECT * FROM lotes_op WHERE status='RODANDO' "
+                           "ORDER BY id DESC LIMIT 1").fetchone()
+
+
+@app.route("/op/<tipo>")
+@exige_login
+def operacao(tipo):
+    cfg = OPERACOES.get(tipo)
+    if not cfg:
+        return redirect(url_for("index"))
+    erro = request.args.get("erro", "")
+    cabecalho = "".join(f"<th>{c}</th>" for c in cfg["cols"])
+    exemplo = " · ".join(cfg["cols"])
+    with db() as con:
+        ultimos = con.execute(
+            "SELECT l.*, (SELECT COUNT(*) FROM operacoes o WHERE o.lote_id=l.id) tot, "
+            "(SELECT COUNT(*) FROM operacoes o WHERE o.lote_id=l.id AND "
+            "o.status LIKE 'ERRO%') err FROM lotes_op l WHERE tipo=? "
+            "ORDER BY id DESC LIMIT 10", (cfg["etapa"],)).fetchall()
+    hist = "".join(
+        f'<tr><td><a href="{url_for("ver_operacao", lote_id=l["id"])}">nº {l["id"]}</a></td>'
+        f'<td>{l["iniciada"]}</td><td>{l["filial"]}</td>'
+        f'<td>{l["tot"]}</td><td>{l["err"]}</td>'
+        f'<td class="st-{"CRIADO" if l["status"] == "CONCLUIDA" else ("ERRO" if l["status"] == "FALHOU" else "PROCESSANDO")}">'
+        f'{l["status"]}</td>'
+        f'<td><a class="botao" style="padding:3px 8px;font-size:12px" '
+        f'href="{url_for("exportar_operacao", lote_id=l["id"])}">⬇ Excel</a></td>'
+        f'</tr>' for l in ultimos)
+    conteudo = f"""
+    {f'<div class="erro">{erro}</div>' if erro else ''}
+    <div class="cartao">
+      <h2>{cfg['titulo']}</h2>
+      <p class="mini">{cfg['ajuda']}<br>
+      <b>Tela independente:</b> não tem trava de CPF, não consulta nem grava
+      nada dos outros cadastros — faz exatamente o que você digitar aqui.</p>
+      <form method="post" action="{url_for('rodar_operacao', tipo=tipo)}" id="form-criar">
+        <label>Filial — código do Protheus (digite qualquer uma)</label>
+        <input type="text" name="filial" required autocomplete="off"
+               placeholder="01ALFA0001" pattern="[0-9A-Za-z]{{6,20}}">
+        <label>Dados — cole do Excel ou digite ({exemplo})</label>
+        <div class="rolagem">
+          <table class="grade" id="grade">
+            <thead><tr><th style="width:38px">#</th>{cabecalho}
+            <th style="width:38px"></th></tr></thead>
+            <tbody id="grade-corpo"></tbody>
+          </table>
+        </div>
+        <input type="hidden" name="linhas" id="linhas">
+        <button type="submit">▶ Executar</button>
+      </form>
+    </div>
+    <div class="cartao">
+      <h3>Histórico desta operação</h3>
+      <div class="rolagem"><table>
+        <tr><th>Lote</th><th>Iniciado</th><th>Filial</th><th>Linhas</th>
+        <th>Erros</th><th>Situação</th><th>Exportar</th></tr>
+        {hist or '<tr><td colspan="7">Nenhum lote ainda.</td></tr>'}
+      </table></div>
+      <p class="mini">Histórico só desta operação. Cada lote pode ser
+      exportado em Excel com o que foi digitado e o que o Protheus gerou.</p>
+    </div>
+    """ + script_grade(len(cfg["cols"]))
+    return render(conteudo, aba="op-" + tipo)
+
+
+@app.route("/rodar_op/<tipo>", methods=["POST"])
+@exige_login
+def rodar_operacao(tipo):
+    cfg = OPERACOES.get(tipo)
+    if not cfg:
+        return redirect(url_for("index"))
+    filial = (request.form.get("filial") or "").strip().upper()
+    if not re.fullmatch(r"[0-9A-Z]{6,20}", filial or ""):
+        return redirect(url_for("operacao", tipo=tipo,
+                                erro="Informe o código da filial (ex.: 01ALFA0001)."))
+    itens, problemas = [], []
+    for n, bruta in enumerate((request.form.get("linhas") or "").splitlines(), 1):
+        partes = [p.strip() for p in re.split(r"[\t;]", bruta)]
+        if not any(partes):
+            continue
+        item = {c: (partes[i] if i < len(partes) else "")
+                for i, c in enumerate(cfg["campos"])}
+        faltando = [cfg["cols"][i] for i, c in enumerate(cfg["campos"])
+                    if not item.get(c)]
+        if faltando:
+            problemas.append(f"Linha {n}: falta {', '.join(faltando)}")
+            continue
+        item["filial"] = filial
+        itens.append(item)
+    if problemas:
+        return redirect(url_for("operacao", tipo=tipo, erro=" | ".join(problemas[:4])))
+    if not itens:
+        return redirect(url_for("operacao", tipo=tipo, erro="Nenhuma linha preenchida."))
+    if not _trava_execucao.acquire(blocking=False):
+        return redirect(url_for("operacao", tipo=tipo,
+                                erro="Já existe uma execução em andamento — aguarde."))
+    try:
+        with db() as con:
+            cur = con.execute(
+                "INSERT INTO lotes_op (tipo, filial, iniciada) VALUES (?,?,?)",
+                (cfg["etapa"], filial, agora()))
+            lote_id = cur.lastrowid
+            pendentes = []
+            for it in itens:
+                cur = con.execute(
+                    "INSERT INTO operacoes (lote_id, tipo, filial, entrada) "
+                    "VALUES (?,?,?,?)",
+                    (lote_id, cfg["etapa"], filial, json.dumps(it, ensure_ascii=False)))
+                pendentes.append({"id": cur.lastrowid, **it})
+        threading.Thread(target=rodar_lote_op,
+                         args=(lote_id, cfg["etapa"], pendentes),
+                         daemon=True).start()
+    except Exception:
+        _trava_execucao.release()
+        raise
+    return redirect(url_for("ver_operacao", lote_id=lote_id))
+
+
+def rodar_lote_op(lote_id, etapa, pendentes):
+    """Roda um lote de operação única e grava o andamento em `operacoes`."""
+    try:
+        lote = [{"row_number": p["id"], "filial": p["filial"],
+                 "nome": p.get("nome", ""), "cpf": p.get("cpf", ""),
+                 "funcao": p.get("funcao", ""),
+                 "codigo_banco": p.get("codigo_banco", ""),
+                 "id_usuario": p.get("id_usuario", ""),
+                 "codigo_vendedor": p.get("codigo_vendedor", ""),
+                 "rfid": p.get("rfid", "")} for p in pendentes]
+        b64 = base64.b64encode(json.dumps(lote).encode("utf-8")).decode("ascii")
+        proc = subprocess.Popen(
+            [sys.executable, SCRIPT_COMPLETO, "--json-b64", b64,
+             "--etapas", etapa, "--avulso"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", cwd=BASE_DIR)
+        _proc_atual.update(execucao_id=("op", lote_id), proc=proc)
+        erros_txt = []
+        threading.Thread(target=lambda: erros_txt.extend(proc.stderr),
+                         daemon=True).start()
+        matador = threading.Timer(TIMEOUT_EXECUCAO_S, proc.kill)
+        matador.start()
+        try:
+            for linha in proc.stdout:
+                linha = linha.strip()
+                if not linha.startswith("@@PARCIAL@@"):
+                    continue
+                try:
+                    r = json.loads(linha[len("@@PARCIAL@@"):])
+                except ValueError:
+                    continue
+                _grava_operacao(etapa, r)
+            proc.wait()
+        finally:
+            matador.cancel()
+            _proc_atual.update(execucao_id=None, proc=None)
+        with db() as con:
+            pend = con.execute("SELECT COUNT(*) c FROM operacoes WHERE lote_id=? "
+                               "AND status='PROCESSANDO'", (lote_id,)).fetchone()["c"]
+            if pend:
+                con.execute("UPDATE operacoes SET status=?, quando=? WHERE lote_id=? "
+                            "AND status='PROCESSANDO'",
+                            (f"ERRO: o robô terminou sem resultado. "
+                             f"{''.join(erros_txt)[-300:]}", agora(), lote_id))
+            _finaliza_lote_op(con, lote_id)
+    except Exception as e:
+        with db() as con:
+            con.execute("UPDATE operacoes SET status=?, quando=? WHERE lote_id=? "
+                        "AND status='PROCESSANDO'", (f"ERRO: {e}", agora(), lote_id))
+            _finaliza_lote_op(con, lote_id)
+    finally:
+        _trava_execucao.release()
+
+
+def _grava_operacao(etapa, r):
+    """Traduz o parcial do robô para a linha da operação."""
+    campo_status = {"USUARIO": "status", "VENDEDOR": "status_vendedor",
+                    "RFID": "status_rfid", "BANCO": "status_banco"}[etapa]
+    status = r.get(campo_status) or "ERRO: sem status"
+    if etapa == "USUARIO":
+        resultado = {"usuario": r.get("usuario", ""),
+                     "codigo_banco": r.get("codigo_banco", ""),
+                     "id_usuario": r.get("id_usuario", "")}
+    elif etapa == "VENDEDOR":
+        resultado = {"codigo_vendedor": r.get("codigo_vendedor", "")}
+    elif etapa == "RFID":
+        resultado = {"rfid": r.get("rfid", ""),
+                     "codigo_vendedor": r.get("codigo_vendedor", "")}
+    else:
+        resultado = {"codigo_banco": r.get("codigo_banco", "")}
+    with db() as con:
+        con.execute("UPDATE operacoes SET resultado=?, status=?, quando=? WHERE id=?",
+                    (json.dumps(resultado, ensure_ascii=False), status,
+                     agora(), r.get("row_number")))
+
+
+def _finaliza_lote_op(con, lote_id):
+    err = con.execute("SELECT COUNT(*) c FROM operacoes WHERE lote_id=? "
+                      "AND status LIKE 'ERRO%'", (lote_id,)).fetchone()["c"]
+    con.execute("UPDATE lotes_op SET finalizada=?, status=? WHERE id=?",
+                (agora(), "FALHOU" if err else "CONCLUIDA", lote_id))
+
+
+@app.route("/operacao/<int:lote_id>")
+@exige_login
+def ver_operacao(lote_id):
+    with db() as con:
+        lote = con.execute("SELECT * FROM lotes_op WHERE id=?", (lote_id,)).fetchone()
+        linhas = con.execute("SELECT * FROM operacoes WHERE lote_id=? ORDER BY id",
+                             (lote_id,)).fetchall()
+    if not lote:
+        return redirect(url_for("index"))
+    tipo = lote["tipo"].lower()
+    cfg = next((c for c in OPERACOES.values() if c["etapa"] == lote["tipo"]), None)
+    rodando = lote["status"] == "RODANDO"
+    cabecalho = "".join(f"<th>{c}</th>" for c in (cfg["cols"] if cfg else []))
+    corpo = ""
+    for i, l in enumerate(linhas, 1):
+        entrada = json.loads(l["entrada"])
+        res = json.loads(l["resultado"] or "{}")
+        cels = "".join(f"<td>{entrada.get(c, '')}</td>"
+                       for c in (cfg["campos"] if cfg else []))
+        gerado = " · ".join(f"{k}={v}" for k, v in res.items() if v) or "—"
+        corpo += (f"<tr><td>{i}</td>{cels}<td>{gerado}</td>"
+                  f'<td class="st-{classe_status(l["status"])}" title="{l["status"]}">'
+                  f'{l["status"][:60]}</td><td>{l["quando"] or ""}</td></tr>')
+    parar = ""
+    if rodando:
+        parar = (f'<form method="post" action="{url_for("parar_operacao", lote_id=lote_id)}" '
+                 'style="margin:0 0 12px 0"><button type="submit" class="parar">'
+                 '■ Parar execução</button></form>')
+    conteudo = f"""
+    <div class="cartao">
+      <h2>{cfg['titulo'] if cfg else lote['tipo']} — lote nº {lote['id']}</h2>
+      <p>Filial <b>{lote['filial']}</b> · iniciado {lote['iniciada']}
+      {('· finalizado ' + lote['finalizada']) if lote['finalizada'] else ''}
+      · situação <b>{lote['status']}</b></p>
+      {'<p>⏳ Rodando... (a página se atualiza sozinha)</p>' if rodando else ''}
+      {parar}
+      <div class="rolagem"><table>
+        <tr><th>#</th>{cabecalho}<th>GERADO</th><th>SITUAÇÃO</th><th>QUANDO</th></tr>
+        {corpo}
+      </table></div>
+      <p class="mini">Operação única e independente: nada aqui altera ou
+      consulta os outros cadastros do site.</p>
+    </div>
+    """
+    return render(conteudo, aba="op-" + tipo, refresh=rodando)
+
+
+@app.route("/exportar_op/<int:lote_id>")
+@exige_login
+def exportar_operacao(lote_id):
+    """Excel de UM lote de operação única: o que foi digitado + o que gerou."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    with db() as con:
+        lote = con.execute("SELECT * FROM lotes_op WHERE id=?", (lote_id,)).fetchone()
+        linhas = con.execute("SELECT * FROM operacoes WHERE lote_id=? ORDER BY id",
+                             (lote_id,)).fetchall()
+    if not lote:
+        return redirect(url_for("index"))
+    cfg = next((c for c in OPERACOES.values() if c["etapa"] == lote["tipo"]), None)
+    campos = cfg["campos"] if cfg else []
+    cabec = (cfg["cols"] if cfg else []) + [
+        "USUARIO GERADO", "COD. CAIXA", "ID USUARIO", "COD. VENDEDOR", "RFID",
+        "SITUACAO", "QUANDO"]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"{lote['tipo'][:20]}_lote{lote_id}"
+    ws.append(["FILIAL"] + cabec)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.fill = PatternFill("solid", fgColor="DDEBF7")
+    for l in linhas:
+        ent = json.loads(l["entrada"])
+        res = json.loads(l["resultado"] or "{}")
+        ws.append([l["filial"]] + [ent.get(k, "") for k in campos] + [
+            res.get("usuario", ""), res.get("codigo_banco", ""),
+            res.get("id_usuario", ""), res.get("codigo_vendedor", ""),
+            res.get("rfid", ""), l["status"], l["quando"] or ""])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    nome = (f"{lote['tipo'].lower()}_lote{lote_id}_{lote['filial']}_"
+            f"{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx")
+    return send_file(buf, as_attachment=True, download_name=nome,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/parar_op/<int:lote_id>", methods=["POST"])
+@exige_login
+def parar_operacao(lote_id):
+    info = dict(_proc_atual)
+    if info["execucao_id"] == ("op", lote_id) and info["proc"] is not None \
+            and info["proc"].poll() is None:
+        subprocess.run(["taskkill", "/PID", str(info["proc"].pid), "/T", "/F"],
+                       capture_output=True)
+        try:
+            os.remove(os.path.join(
+                os.environ.get("TEMP", "."),
+                f"protheus_autocadastro_{CHROME_DEBUG.rsplit(':', 1)[-1]}.lock"))
+        except OSError:
+            pass
+    return redirect(url_for("ver_operacao", lote_id=lote_id))
+
+
 @app.route("/criar_completo", methods=["POST"])
 @exige_login
 def criar_completo():
@@ -908,6 +1331,18 @@ def ver_execucao(execucao_id):
     situacao = ("⏳ Rodando... (a página se atualiza sozinha; cada usuário leva ~1 min)"
                 if rodando else
                 f"Resultado: {ex['criados']} criado(s), {ex['erros']} erro(s) de {ex['total']}")
+    aviso = request.args.get("aviso", "")
+    com_erro = sum(1 for u in usuarios
+                   if str(u["status"] or "").startswith("ERRO"))
+    botao_todos = ""
+    if not rodando and com_erro:
+        botao_todos = f"""
+        <form method="post" action="{url_for('criados_manual_todos', execucao_id=ex['id'])}"
+              style="margin:0 0 12px 0; display:inline-block"
+              onsubmit="return confirm('Marcar as {com_erro} linha(s) com ERRO como CRIADAS MANUALMENTE?\\n\\nUse quando você já criou essas pessoas no Protheus por conta própria. Os CPFs passam a contar como utilizados.')">
+          <button type="submit" class="manual" style="font-size:13px;padding:6px 12px">
+            ✓ Criei todos manualmente ({com_erro})</button>
+        </form>"""
     botao_parar = ""
     if rodando:
         botao_parar = f"""
@@ -923,7 +1358,8 @@ def ver_execucao(execucao_id):
       {('| Finalizada: ' + ex['finalizada']) if ex['finalizada'] else ''}
       | Situação: <b>{ex['status']}</b></p>
       <p>{situacao}</p>
-      {botao_parar}
+      {f'<div class="ok">{aviso}</div>' if aviso else ''}
+      {botao_parar}{botao_todos}
       {render_tabela(usuarios, marcar_manual=not rodando, editar=not rodando)}
       {'' if rodando else '<p class="mini">Linhas com ERRO têm o botão '
        '"✓ Usuário foi criado manualmente": use quando você mesmo criou a '
@@ -999,6 +1435,55 @@ def editar_usuario(usuario_id):
     </div>
     """
     return render(conteudo, aba="historico")
+
+
+@app.route("/criados_manual_todos/<int:execucao_id>", methods=["POST"])
+@exige_login
+def criados_manual_todos(execucao_id):
+    """
+    Marca TODAS as linhas com ERRO da execução como criadas manualmente
+    (pedido do usuário em 31/07/2026 — em vez de clicar uma por uma).
+    """
+    with db() as con:
+        n = con.execute(
+            "UPDATE usuarios SET status='CRIADO MANUALMENTE', criado_em=? "
+            "WHERE execucao_id=? AND status LIKE 'ERRO%'",
+            (agora(), execucao_id)).rowcount
+        con.execute("""UPDATE execucoes SET
+            criados=(SELECT COUNT(*) FROM usuarios x
+                     WHERE x.execucao_id=execucoes.id AND x.status LIKE 'CRIADO%'),
+            erros=(SELECT COUNT(*) FROM usuarios x
+                   WHERE x.execucao_id=execucoes.id AND x.status LIKE 'ERRO%')
+            WHERE id=?""", (execucao_id,))
+        con.execute("UPDATE execucoes SET status='CONCLUIDA' "
+                    "WHERE id=? AND erros=0 AND status IN ('FALHOU','CANCELADO')",
+                    (execucao_id,))
+    return redirect(url_for("ver_execucao", execucao_id=execucao_id,
+                            aviso=f"{n} linha(s) marcada(s) como criadas manualmente."))
+
+
+@app.route("/apagar_filial", methods=["POST"])
+@exige_login
+def apagar_filial():
+    """
+    Apaga do BANCO DO SITE todos os registros de uma filial (pedido do usuário
+    em 31/07/2026: "excluir todos de um posto"). O Protheus NÃO é tocado —
+    serve para limpar a base local e poder recadastrar o posto inteiro.
+    """
+    filial = (request.form.get("filial") or "").strip().upper()
+    if not filial:
+        return redirect(url_for("planilha"))
+    with db() as con:
+        n = con.execute("DELETE FROM usuarios WHERE filial=?", (filial,)).rowcount
+        con.execute("""UPDATE execucoes SET
+            total=(SELECT COUNT(*) FROM usuarios x WHERE x.execucao_id=execucoes.id),
+            criados=(SELECT COUNT(*) FROM usuarios x
+                     WHERE x.execucao_id=execucoes.id AND x.status LIKE 'CRIADO%'),
+            erros=(SELECT COUNT(*) FROM usuarios x
+                   WHERE x.execucao_id=execucoes.id AND x.status LIKE 'ERRO%')""")
+    return redirect(url_for("planilha", aviso=(
+        f"{n} registro(s) da filial {filial} apagados do banco do site. "
+        "O Protheus não foi alterado.")))
 
 
 @app.route("/criado_manual/<int:usuario_id>", methods=["POST"])
@@ -1112,7 +1597,12 @@ def planilha():
     {f'<div class="ok">{aviso}</div>' if aviso else ''}
     <div class="cartao">
       <h2>Usuários criados pela automação</h2>
-      <p><a href="{url_for('exportar')}" class="botao">⬇ Exportar Excel</a></p>
+      <p><a href="{url_for('exportar')}" class="botao">⬇ Exportar Excel</a>
+      {(f'''<form method="post" action="{url_for('apagar_filial')}" style="display:inline; margin-left:10px"
+             onsubmit="return confirm('APAGAR do banco do site TODOS os registros da filial {filial_sel}?\\n\\nO Protheus NÃO é alterado — os usuários continuam existindo lá. Isto só limpa a base local (libera os CPFs para recadastrar).')">
+          <input type="hidden" name="filial" value="{filial_sel}">
+          <button type="submit" class="parar">✕ Excluir todos da filial {filial_sel} (só do site)</button>
+        </form>''') if filial_sel else ''}</p>
       <div class="abas">{abas}</div>
       {render_tabela(usuarios, apagar=True, editar=True)}
       <p class="mini">{len(usuarios)} usuário(s) criado(s)

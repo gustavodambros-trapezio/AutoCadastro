@@ -587,6 +587,29 @@ class TelaProtheus:
         time.sleep(5)
         return True
 
+    def sessao_expirada(self):
+        """
+        O Protheus derrubou a sessão por inatividade? Aparece o aviso
+        "Conforme configuração realizada pelo Administrador do sistema, esta
+        sessão foi encerrada por inatividade. Clique aqui para voltar ao
+        início." — descoberto em 31/07/2026: as esperas longas (o Salvar do
+        vendedor leva minutos) não contam como atividade e a sessão morre no
+        meio, deixando a tela congelada mesmo com o registro JÁ GRAVADO.
+        """
+        return bool(self.tem_texto("encerrada por inatividade"))
+
+    def manter_vivo(self):
+        """
+        Gera atividade de mouse (1 pixel) para o Protheus não considerar a
+        sessão inativa durante as esperas longas. Não clica em nada.
+        """
+        try:
+            from selenium.webdriver.common.action_chains import ActionChains
+            ActionChains(self.driver).move_by_offset(1, 0).move_by_offset(-1, 0).perform()
+            return True
+        except Exception:
+            return False
+
     def fecha_dialogos(self, tentativas=4):
         """Fecha popups conhecidos (Reforma Tributária, erro do WebAgent,
         'Autorização do superior'...)."""
@@ -1013,7 +1036,13 @@ class TelaProtheus:
         self.fecha_dialogos()
         if not self.no_dialogo_contexto():
             if not self.clica_caption("Trocar módulo", exato=True):
-                raise RuntimeError("Botão 'Trocar módulo' não encontrado.")
+                # o menu lateral pode estar "navegado" para dentro de um
+                # submenu (clicar em Atualizações/Cadastros troca a página do
+                # menu) e o 'Trocar módulo' só existe na RAIZ — voltar, e em
+                # último caso recarregar o workspace (31/07/2026)
+                self._voltar_menu_raiz()
+                if not self.clica_caption("Trocar módulo", exato=True):
+                    raise RuntimeError("Botão 'Trocar módulo' não encontrado.")
             time.sleep(5)
             if not self.no_dialogo_contexto():
                 raise RuntimeError("A janelinha de contexto não abriu.")
@@ -1054,6 +1083,35 @@ class TelaProtheus:
         if not self.clica_caption("Confirmar", exato=True):
             raise RuntimeError("Botão 'Confirmar' do contexto não encontrado.")
         self.esperar_modulo_pronto()
+
+    def _voltar_menu_raiz(self, tentativas=5):
+        """
+        Traz o menu lateral de volta à raiz (onde vive o 'Trocar módulo'):
+        clica na seta 'navigate_before' e, se não resolver, RECARREGA a página
+        — seguro porque só é chamado sem formulário aberto.
+        """
+        for _ in range(tentativas):
+            if not self.clica_texto("navigate_before"):
+                break
+            time.sleep(1.5)
+            if self._js(JS_TEM_TROCAR_MODULO):
+                self.log("  menu voltou à raiz")
+                return True
+        self.log("  recarregando o workspace para recuperar o menu")
+        try:
+            self.driver.get(self.driver.current_url)
+        except Exception:
+            self.driver.refresh()
+        fim = time.time() + 180
+        while time.time() < fim:
+            self.fecha_dialogos(tentativas=1)
+            if self._js(JS_TEM_TROCAR_MODULO):
+                time.sleep(2)
+                return True
+            if self.no_dialogo_contexto():
+                return True     # o Protheus já vai pedir o contexto
+            time.sleep(3)
+        return False
 
     def esperar_modulo_pronto(self, limite=180):
         """

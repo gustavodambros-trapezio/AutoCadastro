@@ -242,6 +242,41 @@ nada externo e pode rodar logo após os vendedores.
   usuários no módulo 12 e depois troca para o 97 e cria os vendedores do
   lote, para não ficar trocando de módulo a cada pessoa).
 
+## Site: 5 telas (reorganização de 31/07/2026, pedido do usuário)
+
+Menu do topo, nesta ordem:
+`+ Cadastro Completo | Criar usuário | Criar vendedor | Criar RFID | Criar banco`
+
+- **+ Cadastro Completo** — o fluxo encadeado (4 etapas, com trava de CPF e
+  registro na base). É o único que mantém relação entre as etapas. Dentro
+  dele há um **submenu**: Novo cadastro completo · Só usuários (com trava de
+  CPF, a tela antiga `/`) · Histórico de execuções · Usuários criados pela
+  automação.
+- **Criar usuário / vendedor / RFID / banco** — telas **INDEPENDENTES**
+  (`/op/<tipo>`): fazem UMA operação, em QUALQUER filial digitada, **sem
+  trava de CPF, sem consultar nem gravar nada dos outros cadastros**, com só
+  as colunas que o Protheus exige:
+  | tela | colunas |
+  |---|---|
+  | usuário | NOME COMPLETO · FUNÇÃO |
+  | vendedor | CÓD. CAIXA · NOME COMPLETO · FUNÇÃO · CPF · ID USUÁRIO |
+  | RFID | CÓD. VENDEDOR · CARTÃO RFID |
+  | banco | CÓD. CAIXA |
+  Cada uma tem **histórico próprio** (últimos lotes, com nº de linhas e
+  erros) e **Exportar Excel por lote** (`/exportar_op/<id>`), mostrando o que
+  foi digitado + o que o Protheus gerou.
+- Tabelas próprias no SQLite: `lotes_op` (um lote por execução avulsa) e
+  `operacoes` (uma linha por operação, com `entrada`/`resultado` em JSON).
+  Nada disso entra na planilha de usuários criados.
+- Robô: as telas avulsas chamam `protheus_cadastro_completo.py --etapas
+  <ETAPA> --avulso`; o site lê os `@@PARCIAL@@` e grava em `operacoes`
+  (`rodar_lote_op` / `_grava_operacao`). Há botão **Parar** também aqui.
+- **"✓ Criei todos manualmente (N)"** na tela da execução: marca de uma vez
+  todas as linhas com ERRO como CRIADO MANUALMENTE (antes era 1 por 1).
+- **"✕ Excluir todos da filial (só do site)"** na tela de usuários criados,
+  quando uma filial está selecionada: apaga os registros locais daquele posto
+  (o Protheus não é tocado) e recalcula os contadores.
+
 ## Regras de negócio (confirmadas pelo usuário)
 
 - **Login:** `PRIMEIRO.ULTIMO`; se existir, `PRIMEIRO.PENULTIMO`,
@@ -564,6 +599,19 @@ usuário `ADMIN`). Tudo abaixo está **feito e testado**:
 - **Chrome de produção encontrado FECHADO em 31/07 de manhã** (a máquina não
   reiniciou; causa desconhecida). Sem estrago: o robô reabre e reloga
   sozinho. Reaberto via smoke test de filial falsa.
+- **Fixes de 31/07 na camada de tela** (todos por erro visto ao vivo):
+  (a) `manter_vivo()` + `sessao_expirada()` + relogin automático — a **sessão
+  caía por inatividade** durante os saves longos e a tela congelava DEPOIS de
+  gravar (era a causa real dos "vendedores criados sem confirmação");
+  (b) `_voltar_menu_raiz()` — o menu lateral fica "navegado" dentro dos
+  submenus e o **Trocar módulo desaparece**; agora volta com
+  `navigate_before` ou recarrega o workspace;
+  (c) operações avulsas de RFID/banco **entram no módulo 97** antes de abrir a
+  rotina (antes ficavam no 12 e davam "Menu 'Atualizações' não encontrado").
+- **⚠️ Site encontrado FORA DO AR em 31/07 (~16h)**: o processo do site
+  simplesmente morreu (nenhum python vivo). Foi reiniciado e testado pelo IP
+  da rede. Reforça a urgência da **Parte 5 do SETUP_SERVIDOR.md** (tarefa
+  agendada com reinício automático) — hoje o site é processo manual.
 - **Atualização usuário a usuário em tempo real** (pedido do usuário na
   execução nº 10): o robô agora emite `@@PARCIAL@@{json}` no stdout a cada
   usuário terminado (`_emitir_parcial` em `protheus_criar_usuario.py`) e o

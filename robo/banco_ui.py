@@ -21,7 +21,7 @@ import time
 
 from selenium.webdriver.common.keys import Keys
 
-from vendedor_ui import TelaVendedor
+from vendedor_ui import TelaVendedor, SessaoExpirada
 
 
 class TelaPosto(TelaVendedor):
@@ -110,8 +110,12 @@ class TelaPosto(TelaVendedor):
 
         if not self.clica_caption("Confirmar", exato=True):
             raise RuntimeError("Botão 'Confirmar' do Identfid não encontrado.")
-        fim = time.time() + 300
+        fim = time.time() + 600
         while time.time() < fim:
+            self.manter_vivo()
+            if self.sessao_expirada():
+                raise SessaoExpirada(
+                    f"sessão caiu durante o Confirmar do RFID {num_cartao!r}")
             self.fecha_popup_com_texto("sucesso")
             if not self.tem_texto("Num. Cartao"):
                 return True          # voltou ao browse
@@ -188,8 +192,12 @@ class TelaPosto(TelaVendedor):
 
         if not self.clica_caption("Confirmar", exato=True):
             raise RuntimeError("Botão 'Confirmar' de Bancos não encontrado.")
-        fim = time.time() + 300
+        fim = time.time() + 600
         while time.time() < fim:
+            self.manter_vivo()
+            if self.sessao_expirada():
+                raise SessaoExpirada(
+                    f"sessão caiu durante o Confirmar do banco {codigo_caixa!r}")
             self.fecha_popup_com_texto("sucesso")
             if not self.tem_texto("Bco Oficial"):
                 return True

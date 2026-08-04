@@ -259,7 +259,21 @@ em `protheus_ui.py`:
    Cuidado extra: os botões têm **accesskey** ('A', 'C', 'V', 'F') — digitar
    texto às cegas com o wizard aberto aciona Avançar/Cancelar/Voltar/
    Finalizar aleatoriamente.
-11. **Popup "Autorização do superior"** (pede *Login do usuário* / *Senha
+11. **O menu lateral "navega" para dentro dos submenus.** Clicar em
+   `Atualizações` → `Cadastros (33)` troca a *página* do menu; o botão
+   **Trocar módulo** só existe na RAIZ. Depois disso `trocar_modulo()` falhava
+   com "Botão 'Trocar módulo' não encontrado" mesmo com a sessão viva e sem
+   rotina aberta (erro real em 31/07/2026, na operação avulsa de banco).
+   Solução: `_voltar_menu_raiz()` — clica na seta `navigate_before` e, se não
+   resolver, RECARREGA o workspace (seguro, só é chamado sem formulário
+   aberto).
+12. **Sessão encerrada por inatividade.** Esperas longas (o Salvar do vendedor
+   passa de 4 min) não contam como atividade: o Protheus derruba a sessão e
+   mostra "esta sessão foi encerrada por inatividade / Clique aqui para voltar
+   ao início", congelando a tela **com o registro já gravado**. Tratamento:
+   `manter_vivo()` (move o mouse 1px durante as esperas), `sessao_expirada()`
+   para detectar, e `garantir_sessao()` recarrega + reloga.
+13. **Popup "Autorização do superior"** (pede *Login do usuário* / *Senha
    atual*, botões `Cancelar`/`Finalizar`): apareceu em 30/07/2026 ao abrir a
    rotina 'Cadastro de usuários' na filial 01ALFA0001 e **bloqueou a tela** —
    um lote de 14 falhou inteiro com *"Tela 'Cadastro de usuários' não abriu"*.
