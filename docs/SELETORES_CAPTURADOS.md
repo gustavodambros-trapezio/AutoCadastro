@@ -267,7 +267,13 @@ em `protheus_ui.py`:
    Solução: `_voltar_menu_raiz()` — clica na seta `navigate_before` e, se não
    resolver, RECARREGA o workspace (seguro, só é chamado sem formulário
    aberto).
-12. **Sessão encerrada por inatividade.** Esperas longas (o Salvar do vendedor
+12. **"Aguarde..." eterno = sessão órfã no servidor, não lentidão.** Sessões
+   abandonadas do mesmo login (robô morto no meio, aba fechada, reload sem
+   Log Off) ficam presas no servidor; estourado o limite por login (~5), toda
+   sessão nova fica na fila do dicionário e a tela nunca abre. Receita:
+   fechar todos os `chrome.exe` do perfil do robô **e** o `web-agent`, e
+   reabrir; se persistir, derrubar as sessões no monitor do Protheus.
+13. **Sessão encerrada por inatividade.** Esperas longas (o Salvar do vendedor
    passa de 4 min) não contam como atividade: o Protheus derruba a sessão e
    mostra "esta sessão foi encerrada por inatividade / Clique aqui para voltar
    ao início", congelando a tela **com o registro já gravado**. Tratamento:

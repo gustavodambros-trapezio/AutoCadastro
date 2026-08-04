@@ -1160,6 +1160,21 @@ class TelaProtheus:
         valor = self._js(JS_CTX_VALOR, posicao)
         return (valor or "").strip()
 
+    JS_RECT_FOCO = r"""
+    // Posição do campo que está com o foco (descendo nos shadowRoots).
+    let a = document.activeElement;
+    while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    if (!a) return null;
+    const r = a.getBoundingClientRect();
+    return {x: Math.round(r.x), y: Math.round(r.y),
+            valor: String(a.value === undefined ? '' : a.value)};
+    """
+
+    JS_RECT_ELEMENTO = r"""
+    const r = arguments[0].getBoundingClientRect();
+    return {x: Math.round(r.x), y: Math.round(r.y)};
+    """
+
     def _contexto_escreve(self, posicao, valor):
         """
         Escreve num campo da janela de contexto. Aqui o alvo é o HOST
@@ -1193,7 +1208,7 @@ class TelaProtheus:
         desc_antes = self._contexto_valor(self.IDX_FILIAL_DESC)
         self._contexto_escreve(self.IDX_FILIAL, filial_codigo)
 
-        desc = ""
+        desc, codigo_ok = "", False
         for _ in range(8):
             desc = self._contexto_valor(self.IDX_FILIAL_DESC)
             codigo_ok = self._contexto_valor(self.IDX_FILIAL) == str(filial_codigo)
@@ -1201,7 +1216,13 @@ class TelaProtheus:
                 break
             time.sleep(1.5)
         if not desc:
-            raise FilialInvalida(filial_codigo)
+            # descrição vazia NÃO prova filial inválida (com o Protheus lento
+            # ela demora); a prova é o CÓDIGO ser descartado do campo, que é o
+            # que o Protheus faz com código inexistente (testado: 01ZZZZ9999)
+            if not codigo_ok:
+                raise FilialInvalida(filial_codigo)
+            self.log(f"  aviso: descrição da filial {filial_codigo} não chegou, "
+                     "mas o código foi aceito — seguindo")
         if desc == desc_antes:
             self.log(f"  aviso: a descrição da filial não mudou ({desc!r}) — "
                      f"confirmando pelo código {filial_codigo}")

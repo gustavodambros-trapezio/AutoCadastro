@@ -329,46 +329,74 @@ def garantir_sessao(tela, espera_carregar=90):
     except Exception:
         pass
 
-    fim = time.time() + espera_carregar
-    estado = ""
-    while time.time() < fim:
-        if tela.esta_no_login():
-            estado = "login"
-            break
-        if tela.esta_na_selecao():
-            estado = "selecao"
-            break
-        tela._no_principal()
-        # módulo no ar: menu lateral ('Trocar módulo'), OU uma rotina aberta
-        # (aba [02.x] — nesse estado o menu não existe), OU o título de um
-        # módulo conhecido (12=Controle de Lojas, 97=Posto Inteligente)
-        if (tela._js(JS_TEM_TROCAR_MODULO) or tela._js(JS_TEM_ABA_ROTINA)
-                or tela.tem_texto("Controle de Lojas")
-                or tela.tem_texto("Posto Inteligente")):
-            return
-        log("  página do Protheus ainda carregando...")
-        time.sleep(3)
-    if not estado:
-        return  # não deu para afirmar em que tela está; o lote reclama se preciso
+    # Até 3 rodadas: descobrir o estado, resolver, e CONFERIR que a tela ficou
+    # realmente operável. ⚠️ Não basta ver o texto do módulo: em 31/07/2026 a
+    # página apareceu com os menus no DOM mas a área visual em branco (tela
+    # azul) e sem 'Trocar módulo' — o robô achava a sessão boa e o lote morria
+    # em "Botão 'Trocar módulo' não encontrado". Nesse caso, recarregar.
+    for rodada in range(3):
+        fim = time.time() + espera_carregar
+        estado = ""
+        while time.time() < fim:
+            if tela.esta_no_login():
+                estado = "login"
+                break
+            if tela.esta_na_selecao():
+                estado = "selecao"
+                break
+            tela._no_principal()
+            # operável = menu lateral disponível OU uma rotina aberta
+            # (com rotina aberta o 'Trocar módulo' não existe, e está tudo bem)
+            if tela._js(JS_TEM_TROCAR_MODULO) or tela._js(JS_TEM_ABA_ROTINA):
+                if rodada:
+                    log("Sessão do Protheus restabelecida.")
+                return
+            if tela.sessao_expirada():
+                estado = "expirada"
+                break
+            log("  página do Protheus ainda carregando...")
+            time.sleep(3)
 
-    if estado == "login":
-        if not (PROTHEUS_USER and PROTHEUS_PASS):
-            raise RuntimeError(
-                "O Chrome está na tela de LOGIN do Protheus e não há credenciais "
-                "no .env (LOGIN_BOT_PROTHEUS/SENHA_BOT_PROTHEUS). Faça login "
-                "manualmente nesse Chrome (módulo 12 - Controle de Lojas) e rode "
-                "de novo.")
-        log(f"Tela de login detectada — autenticando como {PROTHEUS_USER}...")
-        tela.fazer_login(PROTHEUS_USER, PROTHEUS_PASS)
-        time.sleep(3)
-        if not tela.esta_na_selecao():
-            time.sleep(15)
-    if tela.esta_na_selecao():
-        log(f"Seleção de contexto — Grupo {GRUPO_EMPRESA} / "
-            f"Filial {FILIAL_CONTEXTO_INICIAL} / Ambiente {AMBIENTE}...")
-        tela.selecionar_contexto_po(GRUPO_EMPRESA, FILIAL_CONTEXTO_INICIAL, AMBIENTE)
-    tela.esperar_modulo_pronto(limite=240)
-    log("Sessão do Protheus restabelecida.")
+        if estado == "login":
+            if not (PROTHEUS_USER and PROTHEUS_PASS):
+                raise RuntimeError(
+                    "O Chrome está na tela de LOGIN do Protheus e não há credenciais "
+                    "no .env (LOGIN_BOT_PROTHEUS/SENHA_BOT_PROTHEUS). Faça login "
+                    "manualmente nesse Chrome (módulo 12 - Controle de Lojas) e rode "
+                    "de novo.")
+            log(f"Tela de login detectada — autenticando como {PROTHEUS_USER}...")
+            tela.fazer_login(PROTHEUS_USER, PROTHEUS_PASS)
+            time.sleep(3)
+            if not tela.esta_na_selecao():
+                time.sleep(15)
+        elif estado in ("", "expirada"):
+            # tela indefinida/congelada (ou sessão morta): recarrega e repete
+            log(f"  tela do Protheus não está operável ({estado or 'indefinida'})"
+                " — recarregando")
+            try:
+                tela.driver.get(PROTHEUS_URL)
+            except Exception:
+                pass
+            time.sleep(10)
+            continue
+
+        if tela.esta_na_selecao():
+            log(f"Seleção de contexto — Grupo {GRUPO_EMPRESA} / "
+                f"Filial {FILIAL_CONTEXTO_INICIAL} / Ambiente {AMBIENTE}...")
+            tela.selecionar_contexto_po(GRUPO_EMPRESA, FILIAL_CONTEXTO_INICIAL, AMBIENTE)
+        try:
+            tela.esperar_modulo_pronto(limite=240)
+            log("Sessão do Protheus restabelecida.")
+            return
+        except RuntimeError as e:
+            log(f"  {e} — tentando de novo")
+            try:
+                tela.driver.get(PROTHEUS_URL)
+            except Exception:
+                pass
+            time.sleep(10)
+    raise RuntimeError(
+        "Não consegui deixar a sessão do Protheus operável (3 tentativas).")
 
 
 class SemConfirmacaoID(RuntimeError):

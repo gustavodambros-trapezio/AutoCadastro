@@ -4,6 +4,17 @@ Automação que cria usuários no **TOTVS Protheus** (WebApp) a partir de um sit
 local. Substituiu uma automação anterior feita "na mão" por um agente que
 clicava por posição na tela.
 
+**Estado (04/08/2026, fim do dia):** site com as 5 telas no ar
+(`+ Cadastro Completo | Criar usuário | Criar vendedor | Criar RFID |
+Criar banco`), usuários validados em produção (14/14 na 01ALFA0001 e 15/15 na
+01LVER0023), **4 vendedores criados** (000020-000023) e as etapas **RFID e
+BANCO ainda NÃO validadas** — RFID por falta dos números dos cartões
+(pendente com o usuário) e banco pelo post-mortem abaixo. O que fazer a
+seguir, em ordem: (1) tarefa agendada do site
+([docs/TAREFA_AGENDADA_SITE.md](docs/TAREFA_AGENDADA_SITE.md)); (2) terminar
+os vendedores da 01ALFA0001 pela tela "Criar vendedor"; (3) validar o banco
+uma vez acompanhando a tela; (4) RFID quando os cartões chegarem.
+
 **Estado (30/07/2026, ~13h): instalado e rodando no PC da sala de servidores.
 O lote real da filial 01ALFA0001 está COMPLETO — 14/14 criados** (execuções
 10-12; a 12 rodou limpa, 7 criados + 7 pulados, 0 erros, ~3 min/usuário, com
@@ -608,6 +619,48 @@ usuário `ADMIN`). Tudo abaixo está **feito e testado**:
   `navigate_before` ou recarrega o workspace;
   (c) operações avulsas de RFID/banco **entram no módulo 97** antes de abrir a
   rotina (antes ficavam no 12 e davam "Menu 'Atualizações' não encontrado").
+- **⚠️⚠️⚠️ POST-MORTEM 04/08/2026 — REGRESSÃO MINHA no diálogo de contexto
+  (leia antes de mexer em `_contexto_escreve`).** Tentando resolver um bug em
+  que o valor do AMBIENTE ("97") era escrito no campo FILIAL, troquei a
+  digitação do **host** `wa-text-input` para o `active_element` / input
+  interno. Isso CONTRARIA o que já estava documentado
+  (SELETORES_CAPTURADOS.md: "no contexto opere o HOST; no input interno a
+  digitação é IGNORADA") e quebrou a troca de filial/módulo: o Protheus parou
+  de registrar os valores (a descrição da filial nunca chegava), o foco ficava
+  presoem campo inválido, e gastei ~12 execuções investigando foco, TAB,
+  clique real e sessões. **Mecânica real (confirmada na sonda):** `send_keys`
+  num custom element vai para o campo que tem o FOCO, não para o elemento
+  indicado — o fluxo original funciona porque o TAB de cada campo deixa o foco
+  no próximo, na ordem Grupo → Filial → Ambiente. **Estado final:** o miolo do
+  contexto foi RESTAURADO do commit (versão validada, a que criou os 4
+  vendedores) + 1 fix legítimo: descrição vazia não é mais tratada como
+  "filial inexistente" (a prova é o código ser descartado do campo).
+  Validado depois da reversão com o smoke test de filial falsa
+  (`01ZZZZ9999` → `ERRO: FILIAL NÃO EXISTE NO PROTHEUS`) ✅.
+  **Lição:** antes de "melhorar" a camada de tela, reler as armadilhas — elas
+  foram escritas a partir de teste ao vivo.
+- **⚠️ ETAPA DE BANCO (etapa 4) NÃO ESTÁ VALIDADA.** O código existe
+  (`banco_ui.ajustar_banco_do_caixa`) mas nunca completou uma vez: as ~12
+  tentativas de 04/08 morreram todas ANTES de chegar à tela de Bancos
+  (sessões órfãs, sessão zumbi, e a regressão acima). Nada foi gravado
+  errado no Protheus. Próximo passo sugerido: rodar UMA vez acompanhando a
+  tela junto com o usuário, em sessão recém-aberta.
+- **⚠️⚠️ SESSÕES ÓRFÃS DO PROTHEUS — a armadilha mais cara do projeto
+  (descoberta em 04/08/2026).** Quatro tentativas seguidas da operação de
+  banco falharam e o sintoma final foi a página ficar **para sempre em
+  "Aguarde..."** (nunca chega ao módulo) — o MESMO travamento que matou a
+  ideia do 2º Chrome. Causa: cada vez que o robô é morto no meio, o Chrome é
+  recarregado sem *Log Off* ou uma aba de teste é fechada, fica uma **sessão
+  órfã do AUTO.PROTHEUS no servidor**. O Protheus limita as sessões por login
+  (~5), então as novas entram na fila esperando o dicionário e nunca abrem.
+  **Como sair disso:** fechar TODOS os `chrome.exe` do perfil
+  `C:\ChromeProtheus` **e** o processo `web-agent`, e deixar o robô abrir tudo
+  de novo (o Protheus voltou a mostrar a tela de login na hora). Se ainda
+  travar, derrubar as sessões do AUTO.PROTHEUS no monitor do Protheus
+  (Miscelânea → Senhas/Monitor) — ou pedir ao TI.
+  **Como evitar:** não abrir sessão nova para testes à toa; ao matar o robô,
+  fechar o Chrome também; e desconfiar de "Aguarde..." eterno = sessão presa,
+  não lentidão.
 - **⚠️ Site encontrado FORA DO AR em 31/07 (~16h)**: o processo do site
   simplesmente morreu (nenhum python vivo). Foi reiniciado e testado pelo IP
   da rede. Reforça a urgência da **Parte 5 do SETUP_SERVIDOR.md** (tarefa
@@ -662,3 +715,6 @@ colar do Excel (10/10 no Selenium) e o ✕ de apagar do banco local.
   Windows, energia/suspender=nunca, logon automático. A política do Chrome
   para o WebAgent (`AutoLaunchProtocolsFromOrigins`) também está pendente —
   a chave `HKCU\Software\Policies` desta máquina exige admin.
+  ➜ O comando pronto (`Register-ScheduledTask` com reinício automático a cada
+  1 min) está em **[docs/TAREFA_AGENDADA_SITE.md](docs/TAREFA_AGENDADA_SITE.md)**;
+  só falta o usuário rodar num PowerShell **como administrador**.

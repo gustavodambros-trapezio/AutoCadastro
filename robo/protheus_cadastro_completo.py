@@ -58,6 +58,15 @@ def _etapas_do_posto(tela, filial, pessoas, etapas):
         try:
             tela.fechar_rotina()
             tela.trocar_modulo(base.GRUPO_EMPRESA, filial, MODULO_POSTO)
+        except base.FilialInvalida as e:
+            msg = f"ERRO: FILIAL {e} NÃO EXISTE NO PROTHEUS"
+            for f in pessoas:
+                if "RFID" in etapas:
+                    f["status_rfid"] = msg
+                if "BANCO" in etapas:
+                    f["status_banco"] = msg
+                _emitir(f)
+            return
         except Exception as e:
             for f in pessoas:
                 if "RFID" in etapas:
