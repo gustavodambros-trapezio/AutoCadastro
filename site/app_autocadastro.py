@@ -851,6 +851,7 @@ def completo():
 OPERACOES = {
     "usuario": {
         "titulo": "Criar usuário (operação única)",
+        "rotulo": "usuário",
         "cols": ["NOME COMPLETO", "FUNÇÃO"],
         "campos": ["nome", "funcao"],
         "etapa": "USUARIO",
@@ -863,6 +864,7 @@ OPERACOES = {
     },
     "vendedor": {
         "titulo": "Criar vendedor (operação única)",
+        "rotulo": "vendedor",
         "cols": ["CÓD. CAIXA", "NOME COMPLETO", "FUNÇÃO", "CPF", "ID USUÁRIO"],
         "campos": ["codigo_banco", "nome", "funcao", "cpf", "id_usuario"],
         "etapa": "VENDEDOR",
@@ -873,6 +875,7 @@ OPERACOES = {
     },
     "rfid": {
         "titulo": "Cadastrar RFID (operação única)",
+        "rotulo": "RFID",
         "cols": ["CÓD. VENDEDOR", "CARTÃO RFID"],
         "campos": ["codigo_vendedor", "rfid"],
         "etapa": "RFID",
@@ -882,6 +885,7 @@ OPERACOES = {
     },
     "banco": {
         "titulo": "Ajustar banco do caixa (operação única)",
+        "rotulo": "banco",
         "cols": ["CÓD. CAIXA"],
         "campos": ["codigo_banco"],
         "etapa": "BANCO",
@@ -908,12 +912,22 @@ def operacao(tipo):
     erro = request.args.get("erro", "")
     cabecalho = "".join(f"<th>{c}</th>" for c in cfg["cols"])
     exemplo = " · ".join(cfg["cols"])
+
+    # --- grade pré-preenchida a partir de um lote da etapa ANTERIOR ---------
+    # (botão "→ Criar <próxima etapa>" do histórico). Só PREENCHE a tela;
+    # quem manda executar é o usuário, no botão normal.
+    linhas_pre, filial_pre, aviso_pre = "", "", ""
+    de_lote = request.args.get("de_lote", type=int)
+    if de_lote:
+        linhas_pre, filial_pre, aviso_pre = _prefill_de_lote(de_lote, cfg)
+
     with db() as con:
         ultimos = con.execute(
             "SELECT l.*, (SELECT COUNT(*) FROM operacoes o WHERE o.lote_id=l.id) tot, "
             "(SELECT COUNT(*) FROM operacoes o WHERE o.lote_id=l.id AND "
             "o.status LIKE 'ERRO%') err FROM lotes_op l WHERE tipo=? "
             "ORDER BY id DESC LIMIT 10", (cfg["etapa"],)).fetchall()
+    prox = PROXIMA_ETAPA.get(tipo)
     hist = "".join(
         f'<tr><td><a href="{url_for("ver_operacao", lote_id=l["id"])}">nº {l["id"]}</a></td>'
         f'<td>{l["iniciada"]}</td><td>{l["filial"]}</td>'
@@ -922,7 +936,12 @@ def operacao(tipo):
         f'{l["status"]}</td>'
         f'<td><a class="botao" style="padding:3px 8px;font-size:12px" '
         f'href="{url_for("exportar_operacao", lote_id=l["id"])}">⬇ Excel</a></td>'
-        f'</tr>' for l in ultimos)
+        + (f'<td><a class="botao" style="padding:3px 8px;font-size:12px;background:#0c3c60" '
+           f'href="{url_for("operacao", tipo=prox, de_lote=l["id"])}" '
+           f'title="Abre a tela de {OPERACOES[prox]["rotulo"]} com estes dados já '
+           f'preenchidos — você revisa e executa">→ Criar {OPERACOES[prox]["rotulo"]}</a></td>'
+           if prox else '')
+        + '</tr>' for l in ultimos)
     conteudo = f"""
     {f'<div class="erro">{erro}</div>' if erro else ''}
     <div class="cartao">
@@ -930,10 +949,12 @@ def operacao(tipo):
       <p class="mini">{cfg['ajuda']}<br>
       <b>Tela independente:</b> não tem trava de CPF, não consulta nem grava
       nada dos outros cadastros — faz exatamente o que você digitar aqui.</p>
-      <form method="post" action="{url_for('rodar_operacao', tipo=tipo)}" id="form-criar">
+      {f'<div class="aviso">{aviso_pre}</div>' if aviso_pre else ''}
+      <form method="post" action="{url_for('rodar_operacao', tipo=tipo)}" id="form-criar"
+            data-permite-vazio="1">
         <label>Filial — código do Protheus (digite qualquer uma)</label>
         <input type="text" name="filial" required autocomplete="off"
-               placeholder="01ALFA0001" pattern="[0-9A-Za-z]{{6,20}}">
+               value="{filial_pre}" placeholder="01ALFA0001" pattern="[0-9A-Za-z]{{6,20}}">
         <label>Dados — cole do Excel ou digite ({exemplo})</label>
         <div class="rolagem">
           <table class="grade" id="grade">
@@ -943,6 +964,7 @@ def operacao(tipo):
           </table>
         </div>
         <input type="hidden" name="linhas" id="linhas">
+        <input type="hidden" id="pre" value="{linhas_pre}">
         <button type="submit">▶ Executar</button>
       </form>
     </div>
@@ -950,14 +972,59 @@ def operacao(tipo):
       <h3>Histórico desta operação</h3>
       <div class="rolagem"><table>
         <tr><th>Lote</th><th>Iniciado</th><th>Filial</th><th>Linhas</th>
-        <th>Erros</th><th>Situação</th><th>Exportar</th></tr>
-        {hist or '<tr><td colspan="7">Nenhum lote ainda.</td></tr>'}
+        <th>Erros</th><th>Situação</th><th>Exportar</th>
+        {'<th>Próxima etapa</th>' if prox else ''}</tr>
+        {hist or '<tr><td colspan="8">Nenhum lote ainda.</td></tr>'}
       </table></div>
       <p class="mini">Histórico só desta operação. Cada lote pode ser
-      exportado em Excel com o que foi digitado e o que o Protheus gerou.</p>
+      exportado em Excel com o que foi digitado e o que o Protheus gerou.
+      {('<br><b>→ Criar ' + OPERACOES[prox]['rotulo'] + '</b>: abre a tela da '
+        'próxima etapa com os dados deste lote já preenchidos na planilha. '
+        'O que faltar fica em branco para você completar; nada é executado '
+        'até você clicar em ▶ Executar.') if prox else ''}</p>
     </div>
     """ + script_grade(len(cfg["cols"]))
     return render(conteudo, aba="op-" + tipo)
+
+
+# a cadeia do manual: usuário → vendedor → RFID → banco
+PROXIMA_ETAPA = {"usuario": "vendedor", "vendedor": "rfid", "rfid": "banco"}
+
+
+def _prefill_de_lote(lote_id, cfg_destino):
+    """
+    Monta as linhas da grade da tela DESTINO com os dados de um lote de
+    operação anterior (entrada digitada + resultado gerado pelo Protheus).
+    O que a etapa destino precisa e o lote não tem fica em BRANCO — o usuário
+    completa à mão. Devolve (linhas, filial, aviso).
+    """
+    with db() as con:
+        lote = con.execute("SELECT * FROM lotes_op WHERE id=?", (lote_id,)).fetchone()
+        if not lote:
+            return "", "", ""
+        linhas = con.execute(
+            "SELECT * FROM operacoes WHERE lote_id=? ORDER BY id", (lote_id,)).fetchall()
+
+    saida, ignoradas = [], 0
+    for l in linhas:
+        if not str(l["status"] or "").startswith("CRIADO"):
+            ignoradas += 1        # só passa adiante o que deu certo
+            continue
+        dados = dict(json.loads(l["entrada"]))
+        for k, v in json.loads(l["resultado"] or "{}").items():
+            if v:
+                dados[k] = v      # o gerado pelo Protheus manda
+        saida.append(";".join(str(dados.get(c, "") or "") for c in cfg_destino["campos"]))
+
+    faltando = [cfg_destino["cols"][i] for i, c in enumerate(cfg_destino["campos"])
+                if saida and all(not linha.split(";")[i] for linha in saida)]
+    aviso = (f"Vindo do lote nº {lote_id} ({lote['tipo']}, filial "
+             f"{lote['filial']}): {len(saida)} linha(s) preenchida(s)"
+             + (f", {ignoradas} ignorada(s) por não ter concluído" if ignoradas else "")
+             + ". " + (f"Preencha à mão: <b>{', '.join(faltando)}</b>. "
+                       if faltando else "")
+             + "Nada foi executado — revise e clique em ▶ Executar.")
+    return "\\n".join(saida), lote["filial"], aviso
 
 
 @app.route("/rodar_op/<tipo>", methods=["POST"])

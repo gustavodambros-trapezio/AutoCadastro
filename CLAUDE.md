@@ -282,6 +282,16 @@ Menu do topo, nesta ordem:
 - Robô: as telas avulsas chamam `protheus_cadastro_completo.py --etapas
   <ETAPA> --avulso`; o site lê os `@@PARCIAL@@` e grava em `operacoes`
   (`rodar_lote_op` / `_grava_operacao`). Há botão **Parar** também aqui.
+- **Encadeamento das telas (10/08/2026, pedido do usuário)**: no histórico de
+  cada tela individual há a coluna **"Próxima etapa"** com o botão
+  **→ Criar &lt;próxima&gt;** (usuário→vendedor→RFID→banco, `PROXIMA_ETAPA`).
+  Ele abre a tela seguinte **já com a planilha preenchida** com os dados do
+  lote (`_prefill_de_lote` junta o que foi digitado + o que o Protheus gerou)
+  e a filial herdada; **nada executa** — o usuário revisa, completa o que
+  estiver em branco e clica ▶ Executar como sempre. Só passa adiante as
+  linhas que concluíram (as com erro são ignoradas e contadas no aviso), e o
+  aviso azul diz quais colunas ficaram vazias (ex.: CPF, que a tela de
+  usuário não coleta; e o CARTÃO RFID, que não existe no lote de vendedor).
 - **"✓ Criei todos manualmente (N)"** na tela da execução: marca de uma vez
   todas as linhas com ERRO como CRIADO MANUALMENTE (antes era 1 por 1).
 - **"✕ Excluir todos da filial (só do site)"** na tela de usuários criados,
