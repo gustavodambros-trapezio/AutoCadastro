@@ -399,6 +399,52 @@ def garantir_sessao(tela, espera_carregar=90):
         "Não consegui deixar a sessão do Protheus operável (3 tentativas).")
 
 
+def _mata_chrome_robo():
+    """
+    Fecha o Chrome do robô e o WebAgent. Necessário quando a sessão do
+    Protheus fica ZUMBI (tela "Aguarde..." eterna / menus no DOM mas nada
+    responde): o servidor mantém sessões órfãs do mesmo login e as novas
+    entram na fila. Era feito à mão; agora o robô faz sozinho.
+    """
+    import subprocess
+    subprocess.run(["taskkill", "/F", "/T", "/IM", "web-agent.exe"],
+                   capture_output=True)
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+          "Where-Object { $_.CommandLine -match 'ChromeProtheus' } | "
+          "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+          "-ErrorAction SilentlyContinue }")
+    subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                   capture_output=True)
+    time.sleep(8)
+
+
+def conectar_e_garantir(classe_tela=None):
+    """
+    Conecta ao Chrome do robô e devolve (driver, tela) com a sessão PRONTA.
+    Se a sessão não ficar operável, faz o reset completo (fecha Chrome +
+    WebAgent, reabre e reloga) e tenta mais uma vez — foi isso que derrubou
+    os lotes 14, 17 e 18 (11-12/08/2026), e o usuário tinha de resolver
+    manualmente.
+    """
+    classe_tela = classe_tela or TelaProtheus
+    driver = conectar_navegador()
+    tela = classe_tela(driver, log=log)
+    try:
+        garantir_sessao(tela)
+        return driver, tela
+    except Exception as e:
+        log(f"Sessão não ficou operável ({e}) — resetando o Chrome do robô")
+    try:
+        driver.quit()
+    except Exception:
+        pass
+    _mata_chrome_robo()
+    driver = conectar_navegador()      # reabre o Chrome sozinho
+    tela = classe_tela(driver, log=log)
+    garantir_sessao(tela)
+    return driver, tela
+
+
 class SemConfirmacaoID(RuntimeError):
     """O usuário foi confirmado no Protheus mas o ID (6 dígitos) não pôde ser
     lido na lista. Regra do usuário (30/07/2026): o ID é obrigatório — sem
@@ -486,12 +532,7 @@ def criar_usuario(tela, nome_completo, grupo_codigo, filial=""):
     #    Sem ele, não marcamos CRIADO e o LOTE É INTERROMPIDO — foi seguir às
     #    cegas sem essa confirmação que degradou as execuções 9 e 10 (wizard
     #    esquecido aberto bloqueando todos os usuários seguintes).
-    id_usuario = ""
-    for _ in range(6):
-        id_usuario = _ler_id_usuario(tela, login)
-        if id_usuario:
-            break
-        time.sleep(3)
+    id_usuario = _ler_id_usuario(tela, login, nome_completo)
     if not id_usuario:
         exc = SemConfirmacaoID(
             f"não consegui ler o ID do usuário {login} na lista — sem essa "
@@ -506,10 +547,21 @@ def criar_usuario(tela, nome_completo, grupo_codigo, filial=""):
     return login, codigo_banco, id_usuario
 
 
-def _ler_id_usuario(tela, login):
-    """Lê o ID (6 dígitos) da linha do login recém-criado na lista."""
+def _ler_id_usuario(tela, login, nome_completo=""):
+    """
+    Lê o ID (6 dígitos) da linha do usuário recém-criado no browse.
+
+    ⚠️ Esta leitura é a CONFIRMAÇÃO de que o cadastro existe (regra do ID
+    obrigatório), então vale insistir: nos lotes 15, 16 e 19 (11-12/08/2026)
+    o usuário FOI criado mas a leitura falhou e o lote parou. Melhorias:
+      * casa o login de forma exata, por "contém" e também pelo NOME COMPLETO
+        (o browse mostra as duas colunas);
+      * espera até ~2 min (o browse demora a atualizar quando o servidor está
+        lento), mantendo a sessão viva para ela não cair no meio.
+    """
     JS = r"""
-    const login = arguments[0].toLowerCase();
+    const login = (arguments[0] || '').toLowerCase();
+    const nome = (arguments[1] || '').toLowerCase();
     const celulas = [];
     function varre(raiz) {
       for (const el of raiz.querySelectorAll('*')) {
@@ -525,20 +577,40 @@ def _ler_id_usuario(tela, login):
       }
     }
     varre(document);
-    const linha = celulas.find(c => c.t.toLowerCase() === login);
-    if (!linha) return null;
-    const id = celulas.find(c => Math.abs(c.y - linha.y) < 6 && c.x < linha.x && /^\d{6}$/.test(c.t));
-    return id ? id.t : null;
+    function idDaLinha(linha) {
+      const id = celulas.find(c => Math.abs(c.y - linha.y) < 6 && c.x < linha.x
+                                   && /^\d{6}$/.test(c.t));
+      return id ? id.t : null;
+    }
+    // 1) login exato  2) login contido  3) nome completo exato/contido
+    const tentativas = [
+      c => c.t.toLowerCase() === login,
+      c => login && c.t.toLowerCase().includes(login),
+      c => nome && c.t.toLowerCase() === nome,
+      c => nome && c.t.toLowerCase().includes(nome),
+    ];
+    for (const casa of tentativas) {
+      for (const linha of celulas.filter(casa)) {
+        const id = idDaLinha(linha);
+        if (id) return id;
+      }
+    }
+    return null;
     """
-    for _ in range(6):
+    fim = time.time() + 120
+    while time.time() < fim:
         try:
             tela._no_principal()
-            valor = tela.driver.execute_script(JS, login)
+            valor = tela.driver.execute_script(JS, login, nome_completo)
             if valor and re.fullmatch(r"\d{6}", valor):
                 return valor
         except Exception:
             pass
-        time.sleep(2)
+        try:
+            tela.manter_vivo()      # esperas longas derrubam a sessão
+        except Exception:
+            pass
+        time.sleep(4)
     return ""
 
 
@@ -612,9 +684,7 @@ def main():
     adquirir_trava()
     driver = None
     try:
-        driver = conectar_navegador()
-        tela = TelaProtheus(driver, log=log)
-        garantir_sessao(tela)
+        driver, tela = conectar_e_garantir()
 
         for filial, lista in grupos.items():
             if not filial:

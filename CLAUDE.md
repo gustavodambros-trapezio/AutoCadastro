@@ -629,6 +629,18 @@ usuário `ADMIN`). Tudo abaixo está **feito e testado**:
   `navigate_before` ou recarrega o workspace;
   (c) operações avulsas de RFID/banco **entram no módulo 97** antes de abrir a
   rotina (antes ficavam no 12 e davam "Menu 'Atualizações' não encontrado").
+- **Correções de 12/08/2026 (lotes 14-19 do usuário falharam):**
+  (a) **leitura do ID mais insistente** — `_ler_id_usuario` agora casa o login
+  exato, por "contém" E pelo **nome completo** (o browse mostra as duas
+  colunas), insistindo por até 2 min com `manter_vivo()`. Os lotes 15, 16 e 19
+  pararam com "não consegui ler o ID" DEPOIS de criar o usuário: a leitura
+  falhava, não a criação;
+  (b) **reset automático do Chrome** — `conectar_e_garantir()` +
+  `_mata_chrome_robo()`: se a sessão não fica operável, o robô fecha o Chrome
+  do perfil e o `web-agent`, reabre e reloga sozinho, e só então desiste. Os
+  lotes 14, 17 e 18 morreram com "Não consegui deixar a sessão do Protheus
+  operável (3 tentativas)" e exigiam reset manual.
+  Ambos os mains (usuários e cadastro completo) usam `conectar_e_garantir()`.
 - **⚠️⚠️⚠️ POST-MORTEM 04/08/2026 — REGRESSÃO MINHA no diálogo de contexto
   (leia antes de mexer em `_contexto_escreve`).** Tentando resolver um bug em
   que o valor do AMBIENTE ("97") era escrito no campo FILIAL, troquei a

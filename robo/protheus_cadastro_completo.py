@@ -213,9 +213,7 @@ def main():
 
     base.adquirir_trava()
     try:
-        driver = base.conectar_navegador()
-        tela = TelaPosto(driver, log=base.log)
-        base.garantir_sessao(tela)
+        driver, tela = base.conectar_e_garantir(TelaPosto)
 
         for filial in filiais:
             grupo = [f for f in fichas if f["filial"] == filial]
